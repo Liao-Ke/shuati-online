@@ -1,6 +1,8 @@
 import json
 import random
+import datetime
 from fastapi import APIRouter, Depends, HTTPException
+from utils import parse_json_field
 from sqlalchemy.orm import Session
 from database import get_db
 from models import User, QuestionBank, Question, ExamRecord, AnswerRecord
@@ -21,14 +23,14 @@ def _serialize_question(q: Question, hide_answer: bool = True) -> QuestionOut:
 
 
 def _load_all_exam_questions(exam: ExamRecord, db: Session) -> tuple[list[Question], dict[int, AnswerRecord]]:
-    bank_ids = json.loads(exam.bank_ids)
+    bank_ids = parse_json_field(exam.bank_ids)
     banks = db.query(QuestionBank).filter(QuestionBank.id.in_(bank_ids)).all()
     all_questions = []
     for bank in banks:
         all_questions.extend(bank.questions)
 
     if exam.question_ids:
-        selected_ids = set(json.loads(exam.question_ids))
+        selected_ids = set(parse_json_field(exam.question_ids))
         all_questions = [q for q in all_questions if q.id in selected_ids]
 
     if exam.mode == "random":
@@ -114,13 +116,10 @@ def current_question(
         q_out = _serialize_question(q, hide_answer=not is_answered)
         user_answer_display = None
         if record and record.user_answer:
-            try:
-                user_answer_display = json.loads(record.user_answer) if record.user_answer.startswith("[") else record.user_answer
-            except (json.JSONDecodeError, TypeError):
-                user_answer_display = record.user_answer
+            user_answer_display = parse_json_field(record.user_answer)
         correct_answer = None
         if is_answered:
-            correct_answer = json.loads(q.answer) if q.answer and q.answer.startswith("[") else q.answer
+            correct_answer = parse_json_field(q.answer)
         return ExamCurrent(
             exam_id=exam.id, current_index=index + 1, total_count=exam.question_count,
             question=q_out, is_answered=is_answered,
@@ -181,7 +180,7 @@ def submit_answer(data: AnswerSubmit, user: User = Depends(get_current_user), db
     if not question:
         raise HTTPException(status_code=404, detail="题目不存在")
 
-    correct_answer = json.loads(question.answer) if question.answer and question.answer.startswith("[") else question.answer
+    correct_answer = parse_json_field(question.answer)
 
     if question.type == "choice":
         is_correct = data.user_answer == correct_answer
@@ -214,7 +213,7 @@ def submit_answer(data: AnswerSubmit, user: User = Depends(get_current_user), db
         exam.correct_count += 1
     else:
         exam.wrong_count += 1
-    exam.duration_seconds = max(exam.duration_seconds or 0, record.time_spent_seconds)
+    exam.duration_seconds = (exam.duration_seconds or 0) + record.time_spent_seconds
     db.commit()
 
     remaining, answered = _load_exam_questions(exam, db)
@@ -222,7 +221,7 @@ def submit_answer(data: AnswerSubmit, user: User = Depends(get_current_user), db
 
     if is_last:
         exam.status = "completed"
-        exam.finished_at = __import__("datetime").datetime.utcnow()
+        exam.finished_at = datetime.datetime.utcnow()
         db.commit()
 
     correct_display = correct_answer
@@ -254,20 +253,17 @@ def exam_preview(
     questions = []
     for i, q in enumerate(all_questions):
         record = answered_map.get(q.id)
-        correct_answer = json.loads(q.answer) if q.answer and q.answer.startswith("[") else q.answer
+        correct_answer = parse_json_field(q.answer)
         user_answer = None
         if record and record.user_answer:
-            try:
-                user_answer = json.loads(record.user_answer) if record.user_answer.startswith("[") else record.user_answer
-            except (json.JSONDecodeError, TypeError):
-                user_answer = record.user_answer
+            user_answer = parse_json_field(record.user_answer)
         questions.append({
             "index": i,
             "id": q.id,
             "type": q.type,
             "chapter": q.chapter,
             "content": q.content,
-            "options": json.loads(q.options) if q.options else None,
+            "options": parse_json_field(q.options),
             "answer": correct_answer,
             "analysis": q.analysis,
             "user_answer": user_answer,
@@ -308,22 +304,24 @@ def exam_result(exam_id: int, user: User = Depends(get_current_user), db: Sessio
         AnswerRecord.exam_id == exam.id
     ).order_by(AnswerRecord.id).all()
 
+    question_ids = [a.question_id for a in answers if a.question_id is not None]
+    questions_map = {}
+    if question_ids:
+        for q in db.query(Question).filter(Question.id.in_(question_ids)).all():
+            questions_map[q.id] = q
+
     result_answers = []
     for a in answers:
-        q = db.query(Question).filter(Question.id == a.question_id).first()
+        q = questions_map.get(a.question_id)
         if not q:
             continue
-        correct_answer = json.loads(q.answer) if q.answer and q.answer.startswith("[") else q.answer
-        user_answer_raw = a.user_answer
-        try:
-            user_answer = json.loads(user_answer_raw) if (user_answer_raw or "").startswith("[") else user_answer_raw
-        except (json.JSONDecodeError, TypeError):
-            user_answer = user_answer_raw
+        correct_answer = parse_json_field(q.answer)
+        user_answer = parse_json_field(a.user_answer)
         result_answers.append({
             "question_id": q.id,
             "type": q.type,
             "content": q.content,
-            "options": json.loads(q.options) if q.options else None,
+            "options": parse_json_field(q.options),
             "correct_answer": correct_answer,
             "user_answer": user_answer,
             "is_correct": a.is_correct,

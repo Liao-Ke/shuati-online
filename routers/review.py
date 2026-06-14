@@ -1,3 +1,4 @@
+import datetime
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
 from database import get_db
@@ -79,7 +80,7 @@ def mark_question(
         if record.status != data.status:
             record.status = data.status
             record.review_count += 1
-        record.reviewed_at = __import__("datetime").datetime.utcnow()
+        record.reviewed_at = datetime.datetime.utcnow()
     else:
         record = ReviewRecord(
             user_id=user.id,

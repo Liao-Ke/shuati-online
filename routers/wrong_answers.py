@@ -1,5 +1,5 @@
-import json
 from fastapi import APIRouter, Depends
+from utils import parse_json_field
 from sqlalchemy.orm import Session
 from sqlalchemy import desc
 from database import get_db
@@ -31,19 +31,15 @@ def list_wrong(user: User = Depends(get_current_user), db: Session = Depends(get
         q = r.question
         if not q:
             continue
-        correct_answer = json.loads(q.answer) if q.answer and q.answer.startswith("[") else q.answer
-        user_answer_raw = r.user_answer
-        try:
-            user_answer = json.loads(user_answer_raw) if (user_answer_raw or "").startswith("[") else user_answer_raw
-        except (json.JSONDecodeError, TypeError):
-            user_answer = user_answer_raw
+        correct_answer = parse_json_field(q.answer)
+        user_answer = parse_json_field(r.user_answer)
         result.append({
             "question_id": q.id,
             "bank_title": q.question_bank.title if q.question_bank else "",
             "type": q.type,
             "chapter": q.chapter,
             "content": q.content,
-            "options": json.loads(q.options) if q.options else None,
+            "options": parse_json_field(q.options),
             "correct_answer": correct_answer,
             "user_answer": user_answer,
             "analysis": q.analysis,
