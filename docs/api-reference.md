@@ -195,6 +195,132 @@
 
 ---
 
+### PUT /api/question-banks/:id
+
+更新题库标题和描述。
+
+**请求体（全部可选，只传要更新的字段）：**
+```json
+{
+  "title": "新标题",
+  "description": "新描述"
+}
+```
+
+**响应 (200)：**
+```json
+{
+  "id": 1,
+  "title": "新标题",
+  "description": "新描述",
+  "question_count": 10,
+  "created_at": "2026-05-13T10:00:00",
+  "updated_at": "2026-06-14T10:00:00"
+}
+```
+
+**错误：** 400 — 标题为空；404 — 题库不存在
+
+---
+
+### GET /api/question-banks/:id/export
+
+导出题库为 JSON 文件，格式与 `/import` 接口兼容。
+
+**响应 (200)：** JSON 文件下载（`Content-Disposition: attachment`）
+
+```json
+{
+  "title": "题库名称",
+  "description": "描述",
+  "questions": [
+    {
+      "type": "choice",
+      "chapter": "第一章",
+      "content": "1+1=?",
+      "options": ["A.1", "B.2", "C.3", "D.4"],
+      "answer": "B",
+      "analysis": "解析"
+    }
+  ]
+}
+```
+
+**错误：** 404 — 题库不存在
+
+---
+
+### POST /api/question-banks/:bank_id/questions
+
+在指定题库中新增一道题目。
+
+**请求体：**
+```json
+{
+  "type": "choice",
+  "chapter": "第一章",
+  "content": "1+1=?",
+  "options": ["A.1", "B.2", "C.3", "D.4"],
+  "answer": "B",
+  "analysis": "可选解析"
+}
+```
+
+`type` 可选 `choice` / `fill` / `judge` / `multiple`。不同题型要求：
+- choice：`options` 至少 2 项，`answer` 为选项字母（如 `"B"`）
+- multiple：`options` 至少 2 项，`answer` 为字母数组（如 `["A", "C"]`）
+- fill：`answer` 为字符串或数组（多空），不传 `options`
+- judge：`answer` 为 `"对"` 或 `"错"`，不传 `options`
+
+**响应 (201)：**
+```json
+{
+  "id": 10,
+  "type": "choice",
+  "chapter": "第一章",
+  "content": "1+1=?",
+  "options": "[\"A.1\", \"B.2\", \"C.3\", \"D.4\"]",
+  "answer": "B",
+  "analysis": "可选解析",
+  "sort_order": 5
+}
+```
+
+**错误：** 400 — 校验失败；404 — 题库不存在
+
+---
+
+### PUT /api/questions/:id
+
+编辑题目。支持部分更新和切换题型。
+
+**请求体（全部可选）：**
+```json
+{
+  "type": "fill",
+  "content": "1+1=?",
+  "analysis": "2"
+}
+```
+
+切换题型（如 choice → fill）会自动清理 options 字段。
+
+**响应 (200)：** 同新增题目响应
+
+**错误：** 400 — 校验失败；404 — 题目不存在
+
+---
+
+### DELETE /api/questions/:id
+
+删除一道题目。已关联的答题记录和背题记录不受影响（历史详情中不展示已删除题目）。
+
+**响应：** 204 No Content
+
+**错误：** 404 — 题目不存在
+
+---
+
 ## 答题
 
 ### POST /api/exam/start

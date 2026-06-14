@@ -188,3 +188,26 @@ class ExamProgress(BaseModel):
     total_count: int
     current_index: int
     answers: list[dict] = []
+
+
+class QuestionCreate(BaseModel):
+    type: str
+    chapter: Optional[str] = None
+    content: str
+    options: Optional[List[str]] = None
+    answer: Union[str, List[str]]
+    analysis: Optional[str] = None
+
+
+class QuestionUpdate(BaseModel):
+    type: Optional[str] = None
+    chapter: Optional[str] = None
+    content: Optional[str] = None
+    options: Optional[List[str]] = None
+    answer: Optional[Union[str, List[str]]] = None
+    analysis: Optional[str] = None
+
+
+class BankUpdate(BaseModel):
+    title: Optional[str] = None
+    description: Optional[str] = None

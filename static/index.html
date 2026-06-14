@@ -45,6 +45,99 @@
     </div>
   </div>
 
+  <!-- 题目编辑模态框 -->
+  <div class="modal fade" id="questionFormModal" tabindex="-1">
+    <div class="modal-dialog modal-lg">
+      <div class="modal-content">
+        <div class="modal-header">
+          <h5 class="modal-title" id="qform-title">题目</h5>
+          <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+        </div>
+        <div class="modal-body">
+          <input type="hidden" id="qform-bank-id">
+          <input type="hidden" id="qform-question-id">
+          <div class="mb-3">
+            <label class="form-label">题型</label>
+            <select class="form-select" id="qform-type" onchange="onQFormTypeChange()">
+              <option value="choice">选择题</option>
+              <option value="multiple">多选题</option>
+              <option value="fill">填空题</option>
+              <option value="judge">判断题</option>
+            </select>
+          </div>
+          <div class="mb-3">
+            <label class="form-label">章节</label>
+            <input type="text" class="form-control" id="qform-chapter" placeholder="可选">
+          </div>
+          <div class="mb-3">
+            <label class="form-label">题目内容</label>
+            <textarea class="form-control" id="qform-content" rows="3" required></textarea>
+          </div>
+          <div class="mb-3" id="qform-options-group">
+            <label class="form-label">选项（每行一个，如 "A. 选项一"）</label>
+            <textarea class="form-control" id="qform-options" rows="4" placeholder="A. 选项一&#10;B. 选项二&#10;C. 选项三&#10;D. 选项四"></textarea>
+          </div>
+          <div class="mb-3">
+            <label class="form-label">答案</label>
+            <div id="qform-answer-group"></div>
+          </div>
+          <div class="mb-3">
+            <label class="form-label">解析（可选）</label>
+            <textarea class="form-control" id="qform-analysis" rows="2"></textarea>
+          </div>
+        </div>
+        <div class="modal-footer">
+          <button class="btn btn-secondary" data-bs-dismiss="modal">取消</button>
+          <button class="btn btn-primary" id="qform-save-btn" onclick="saveQForm()">保存</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- 题库编辑模态框 -->
+  <div class="modal fade" id="bankEditModal" tabindex="-1">
+    <div class="modal-dialog">
+      <div class="modal-content">
+        <div class="modal-header">
+          <h5 class="modal-title">编辑题库</h5>
+          <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+        </div>
+        <div class="modal-body">
+          <input type="hidden" id="bankedit-id">
+          <div class="mb-3">
+            <label class="form-label">题库标题</label>
+            <input type="text" class="form-control" id="bankedit-title" required>
+          </div>
+          <div class="mb-3">
+            <label class="form-label">描述</label>
+            <textarea class="form-control" id="bankedit-description" rows="2"></textarea>
+          </div>
+        </div>
+        <div class="modal-footer">
+          <button class="btn btn-secondary" data-bs-dismiss="modal">取消</button>
+          <button class="btn btn-primary" onclick="saveBankEdit()">保存</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- 删除确认模态框 -->
+  <div class="modal fade" id="deleteConfirmModal" tabindex="-1">
+    <div class="modal-dialog modal-sm">
+      <div class="modal-content">
+        <div class="modal-header">
+          <h5 class="modal-title">确认删除</h5>
+          <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+        </div>
+        <div class="modal-body" id="delete-confirm-msg">确定删除吗？</div>
+        <div class="modal-footer">
+          <button class="btn btn-secondary" data-bs-dismiss="modal">取消</button>
+          <button class="btn btn-danger" id="delete-confirm-btn" onclick="doDeleteQuestion()">删除</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
   <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/js/bootstrap.bundle.min.js"></script>
   <script src="/js/api.js"></script>
   <script src="/js/app.js"></script>

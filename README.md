@@ -6,7 +6,8 @@
 
 ## 功能
 
-- **题库管理** — 批量导入 JSON 格式题库，支持多文件同时导入
+- **题库管理** — 批量导入 JSON 格式题库，支持多文件同时导入；题库信息可编辑，支持 JSON 导出
+- **题目编辑** — 支持在题库中新增、编辑和删除单道题目，四种题型均可修改
 - **答题模式** — 顺序/随机出题，单题/整卷两种视图
 - **背题模式** — 一次展示全部题目，逐题标记掌握状态
 - **计时方式** — 单题倒计时或整卷计时（记录总用时）
@@ -83,7 +84,12 @@ docker compose up -d
 | `/api/question-banks/{id}` | GET | 题库详情 |
 | `/api/question-banks/import` | POST | 导入题库 |
 | `/api/question-banks/import-multiple` | POST | 批量导入 |
+| `/api/question-banks/{id}` | PUT | 更新题库信息 |
 | `/api/question-banks/{id}` | DELETE | 删除题库 |
+| `/api/question-banks/{id}/export` | GET | 导出题库 |
+| `/api/question-banks/{bank_id}/questions` | POST | 新增题目 |
+| `/api/questions/{id}` | PUT | 编辑题目 |
+| `/api/questions/{id}` | DELETE | 删除题目 |
 | `/api/review/questions` | POST | 背题列表 |
 | `/api/review/mark` | POST | 标记掌握状态 |
 | `/api/review/stats` | GET | 背题统计 |

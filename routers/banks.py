@@ -1,9 +1,11 @@
 import json
+from urllib.parse import quote
 from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi.responses import Response
 from sqlalchemy.orm import Session
 from database import get_db
 from models import User, QuestionBank, Question
-from schemas import BankImport, BankOut, BankDetail, QuestionOut, ImportResult, BatchImportResponse
+from schemas import BankImport, BankOut, BankDetail, QuestionOut, ImportResult, BatchImportResponse, BankUpdate
 from auth import get_current_user
 
 router = APIRouter(prefix="/api/question-banks", tags=["题库"])
@@ -155,3 +157,73 @@ def delete_bank(bank_id: int, user: User = Depends(get_current_user), db: Sessio
         raise HTTPException(status_code=404, detail="题库不存在")
     db.delete(bank)
     db.commit()
+
+
+@router.put("/{bank_id}", response_model=BankOut)
+def update_bank(
+    bank_id: int, data: BankUpdate,
+    user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    bank = db.query(QuestionBank).filter(
+        QuestionBank.id == bank_id, QuestionBank.user_id == user.id
+    ).first()
+    if not bank:
+        raise HTTPException(status_code=404, detail="题库不存在")
+    if data.title is not None:
+        if not data.title.strip():
+            raise HTTPException(status_code=400, detail="标题不能为空")
+        bank.title = data.title
+    if data.description is not None:
+        bank.description = data.description
+    db.commit()
+    db.refresh(bank)
+    return BankOut(
+        id=bank.id, title=bank.title, description=bank.description,
+        question_count=len(bank.questions),
+        created_at=bank.created_at.isoformat(),
+        updated_at=bank.updated_at.isoformat(),
+    )
+
+
+@router.get("/{bank_id}/export")
+def export_bank(
+    bank_id: int,
+    user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    bank = db.query(QuestionBank).filter(
+        QuestionBank.id == bank_id, QuestionBank.user_id == user.id
+    ).first()
+    if not bank:
+        raise HTTPException(status_code=404, detail="题库不存在")
+
+    questions = []
+    for q in bank.questions:
+        qdata = {
+            "type": q.type,
+        }
+        if q.chapter:
+            qdata["chapter"] = q.chapter
+        qdata["content"] = q.content
+        if q.options:
+            qdata["options"] = json.loads(q.options)
+        qdata["answer"] = json.loads(q.answer) if (q.answer and q.answer.startswith("[")) else q.answer
+        if q.analysis:
+            qdata["analysis"] = q.analysis
+        questions.append(qdata)
+
+    export = {
+        "title": bank.title,
+        "description": bank.description,
+        "questions": questions,
+    }
+
+    json_str = json.dumps(export, ensure_ascii=False, indent=2)
+    filename = f"{bank.title}.json"
+    safe_filename = quote(filename, safe='')
+    return Response(
+        content=json_str,
+        media_type="application/json",
+        headers={"Content-Disposition": f"attachment; filename*=UTF-8''{safe_filename}"},
+    )

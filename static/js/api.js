@@ -62,6 +62,32 @@ const api = {
   getExamPreview(examId) { return this.get(`/exam/${examId}/preview`); },
   getExamResult(examId) { return this.get(`/exam/${examId}/result`); },
 
+  createQuestion(bankId, data) { return this.post(`/question-banks/${bankId}/questions`, data); },
+  updateQuestion(questionId, data) { return this.request('PUT', `/questions/${questionId}`, data); },
+  deleteQuestion(questionId) { return this.delete(`/questions/${questionId}`); },
+  updateBank(bankId, data) { return this.request('PUT', `/question-banks/${bankId}`, data); },
+  async exportBank(bankId) {
+    const headers = {};
+    if (this.token) headers['Authorization'] = `Bearer ${this.token}`;
+    const res = await fetch(`${API_BASE}/question-banks/${bankId}/export`, { headers });
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({}));
+      throw new Error(err.detail || '导出失败');
+    }
+    const blob = await res.blob();
+    const disposition = res.headers.get('Content-Disposition') || '';
+    const match = disposition.match(/filename="?(.+?)"?$/);
+    const filename = match ? match[1] : `bank-${bankId}.json`;
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = filename;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+  },
+
   getHistory(page = 1) { return this.get(`/history?page=${page}&page_size=20`); },
   getHistoryDetail(examId) { return this.get(`/history/${examId}`); },
 

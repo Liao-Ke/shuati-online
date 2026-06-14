@@ -307,3 +307,142 @@ def test_28_review_type_filter_multiple(client, auth_headers):
     multi_filtered = r.json()
     assert len(multi_filtered) == 1
     assert multi_filtered[0]["type"] == "multiple"
+
+
+# ── Test: 题目 CURD ──
+
+
+def test_29_create_question_choice(client, auth_headers):
+    r = client.post(f"/api/question-banks/{state.bank_id}/questions", json={
+        "type": "choice", "chapter": "新章节", "content": "1+2=?",
+        "options": ["A.1", "B.2", "C.3", "D.4"], "answer": "C",
+    }, headers=auth_headers)
+    assert r.status_code == 201
+    data = r.json()
+    assert data["type"] == "choice"
+    assert data["content"] == "1+2=?"
+    assert data["sort_order"] >= 0
+    state._q_choice_id = data["id"]
+
+
+def test_30_create_question_fill(client, auth_headers):
+    r = client.post(f"/api/question-banks/{state.bank_id}/questions", json={
+        "type": "fill", "content": "中国的首都是____", "answer": "北京",
+    }, headers=auth_headers)
+    assert r.status_code == 201
+    state._q_fill_id = r.json()["id"]
+
+
+def test_31_create_question_fill_multi(client, auth_headers):
+    r = client.post(f"/api/question-banks/{state.bank_id}/questions", json={
+        "type": "fill", "content": "____和____是数字", "answer": ["一", "二"],
+    }, headers=auth_headers)
+    assert r.status_code == 201
+    state._q_fill_multi_id = r.json()["id"]
+
+
+def test_32_create_question_judge(client, auth_headers):
+    r = client.post(f"/api/question-banks/{state.bank_id}/questions", json={
+        "type": "judge", "content": "太阳从西边升起", "answer": "错",
+    }, headers=auth_headers)
+    assert r.status_code == 201
+    state._q_judge_id = r.json()["id"]
+
+
+def test_33_create_question_multiple(client, auth_headers):
+    r = client.post(f"/api/question-banks/{state.bank_id}/questions", json={
+        "type": "multiple", "content": "以下哪些是数字？",
+        "options": ["A.一", "B.二", "C.三", "D.四"], "answer": ["A", "B"],
+    }, headers=auth_headers)
+    assert r.status_code == 201
+    state._q_multi_id = r.json()["id"]
+
+
+def test_34_create_question_validation_error(client, auth_headers):
+    r = client.post(f"/api/question-banks/{state.bank_id}/questions", json={
+        "type": "choice", "content": "test", "options": ["A.1"], "answer": "A",
+    }, headers=auth_headers)
+    assert r.status_code == 400
+
+
+def test_35_create_question_nonexistent_bank(client, auth_headers):
+    r = client.post("/api/question-banks/99999/questions", json={
+        "type": "choice", "content": "test",
+        "options": ["A.1", "B.2"], "answer": "A",
+    }, headers=auth_headers)
+    assert r.status_code == 404
+
+
+def test_36_edit_question_content(client, auth_headers):
+    r = client.put(f"/api/questions/{state._q_choice_id}", json={
+        "content": "2+2=?",
+    }, headers=auth_headers)
+    assert r.status_code == 200
+    assert r.json()["content"] == "2+2=?"
+
+
+def test_37_edit_question_switch_type(client, auth_headers):
+    r = client.put(f"/api/questions/{state._q_choice_id}", json={
+        "type": "fill", "content": "1+1=?", "options": None, "answer": "二",
+    }, headers=auth_headers)
+    assert r.status_code == 200
+    data = r.json()
+    assert data["type"] == "fill"
+    assert data["options"] is None
+
+
+def test_38_edit_question_not_found(client, auth_headers):
+    r = client.put("/api/questions/99999", json={"content": "x"}, headers=auth_headers)
+    assert r.status_code == 404
+
+
+def test_39_delete_question(client, auth_headers):
+    r = client.delete(f"/api/questions/{state._q_fill_multi_id}", headers=auth_headers)
+    assert r.status_code == 204
+    bank = client.get(f"/api/question-banks/{state.bank_id}", headers=auth_headers).json()
+    ids = [q["id"] for q in bank["questions"]]
+    assert state._q_fill_multi_id not in ids
+
+
+def test_40_delete_question_not_found(client, auth_headers):
+    r = client.delete("/api/questions/99999", headers=auth_headers)
+    assert r.status_code == 404
+
+
+# ── Test: 题库更新与导出 ──
+
+
+def test_41_update_bank(client, auth_headers):
+    r = client.put(f"/api/question-banks/{state.bank_id}", json={
+        "title": "更新后的题库", "description": "新描述",
+    }, headers=auth_headers)
+    assert r.status_code == 200
+    assert r.json()["title"] == "更新后的题库"
+    assert r.json()["description"] == "新描述"
+
+
+def test_42_export_bank(client, auth_headers):
+    r = client.get(f"/api/question-banks/{state.bank_id}/export", headers=auth_headers)
+    assert r.status_code == 200
+    data = r.json()
+    assert data["title"] == "更新后的题库"
+    assert len(data["questions"]) >= 8
+    export_question = data["questions"][0]
+    assert "type" in export_question
+    assert "content" in export_question
+    assert "answer" in export_question
+
+
+def test_43_export_bank_not_found(client, auth_headers):
+    r = client.get("/api/question-banks/99999/export", headers=auth_headers)
+    assert r.status_code == 404
+
+
+# ── Test: 完整恢复初始数据 ──
+
+
+def test_44_cleanup_restore_bank(client, auth_headers):
+    r = client.put(f"/api/question-banks/{state.bank_id}", json={
+        "title": "测试题库",
+    }, headers=auth_headers)
+    assert r.status_code == 200

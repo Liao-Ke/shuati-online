@@ -1,7 +1,7 @@
 from fastapi import FastAPI
 from fastapi.staticfiles import StaticFiles
 from database import engine, Base
-from routers import auth, banks, exam, history, dashboard, wrong_answers, review
+from routers import auth, banks, exam, history, dashboard, wrong_answers, review, questions
 
 Base.metadata.create_all(bind=engine)
 
@@ -20,4 +20,5 @@ app.include_router(history.router)
 app.include_router(dashboard.router)
 app.include_router(wrong_answers.router)
 app.include_router(review.router)
+app.include_router(questions.router)
 app.mount("/", StaticFiles(directory="static", html=True), name="static")

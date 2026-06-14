@@ -273,11 +273,22 @@ router.add('/banks/:id', async ({ id }) => {
     const bank = await api.getBank(id);
     render(`
       <div class="page-header">
-        <h2><a href="#/banks" class="text-decoration-none me-2">&larr;</a> ${escHtml(bank.title)}</h2>
+        <h2>
+          <a href="#/banks" class="text-decoration-none me-2">&larr;</a>
+          <span id="bank-title">${escHtml(bank.title)}</span>
+          <button class="btn btn-sm btn-outline-secondary ms-2" title="编辑题库" onclick="showBankEditModal(${bank.id})">
+            <i class="bi bi-pencil"></i>
+          </button>
+        </h2>
+        <div class="mb-2">
+          <button class="btn btn-outline-primary btn-sm me-2" onclick="api.exportBank(${bank.id}).catch(e => alert(e.message))">导出</button>
+          <button class="btn btn-primary btn-sm" onclick="showAddQuestion(${bank.id})">+ 新增题目</button>
+        </div>
         <p class="text-muted">共 ${bank.question_count} 题</p>
       </div>
       <div id="questions-by-chapter"></div>
     `);
+    const typeMap = { choice: '选择', multiple: '多选', fill: '填空', judge: '判断' };
     const chapters = {};
     bank.questions.forEach(q => {
       const ch = q.chapter || '未分类';
@@ -288,10 +299,15 @@ router.add('/banks/:id', async ({ id }) => {
     for (const [ch, qs] of Object.entries(chapters)) {
       let html = `<h5 class="mt-3 mb-2">${escHtml(ch)} (${qs.length} 题)</h5>`;
       qs.forEach(q => {
-        const typeMap = { choice: '选择', multiple: '多选', fill: '填空', judge: '判断' };
-        html += `<div class="question-item">
-          <span class="badge bg-secondary me-2">${typeMap[q.type] || q.type}</span>
-          ${escHtml(q.content)}
+        html += `<div class="question-item d-flex align-items-start gap-2">
+          <div class="flex-grow-1">
+            <span class="badge bg-secondary me-2">${typeMap[q.type] || q.type}</span>
+            ${escHtml(q.content)}
+          </div>
+          <div class="text-nowrap">
+            <button class="btn btn-sm btn-outline-secondary py-0 px-1" title="编辑" onclick="showEditQuestion(${bank.id}, ${q.id})"><i class="bi bi-pencil"></i></button>
+            <button class="btn btn-sm btn-outline-danger py-0 px-1" title="删除" onclick="showDeleteQuestion(${bank.id}, ${q.id})"><i class="bi bi-trash"></i></button>
+          </div>
         </div>`;
       });
       container.innerHTML += html;
@@ -1728,6 +1744,224 @@ function setQuickCount(n) {
   const input = document.getElementById('question-count-input');
   slider.value = n;
   input.value = n;
+}
+
+let _deleteBankId = null;
+let _deleteQuestionId = null;
+
+function showAddQuestion(bankId) {
+  document.getElementById('qform-bank-id').value = bankId;
+  document.getElementById('qform-question-id').value = '';
+  document.getElementById('qform-title').textContent = '新增题目';
+  document.getElementById('qform-save-btn').textContent = '新增';
+  document.getElementById('qform-type').value = 'choice';
+  document.getElementById('qform-chapter').value = '';
+  document.getElementById('qform-content').value = '';
+  document.getElementById('qform-options').value = '';
+  document.getElementById('qform-analysis').value = '';
+  document.getElementById('qform-options-group').style.display = 'block';
+  onQFormTypeChange();
+  new bootstrap.Modal(document.getElementById('questionFormModal')).show();
+}
+
+async function showEditQuestion(bankId, questionId) {
+  try {
+    const bank = await api.getBank(bankId);
+    const q = bank.questions.find(x => x.id === questionId);
+    if (!q) { alert('题目不存在'); return; }
+    document.getElementById('qform-bank-id').value = bankId;
+    document.getElementById('qform-question-id').value = questionId;
+    document.getElementById('qform-title').textContent = '编辑题目';
+    document.getElementById('qform-save-btn').textContent = '保存';
+    document.getElementById('qform-type').value = q.type;
+    document.getElementById('qform-chapter').value = q.chapter || '';
+    document.getElementById('qform-content').value = q.content;
+    let optionsStr = '';
+    if (q.options) {
+      try { const opts = JSON.parse(q.options); optionsStr = opts.join('\n'); } catch { optionsStr = q.options; }
+    }
+    document.getElementById('qform-options').value = optionsStr;
+    document.getElementById('qform-analysis').value = q.analysis || '';
+    const isChoiceOrMulti = q.type === 'choice' || q.type === 'multiple';
+    document.getElementById('qform-options-group').style.display = isChoiceOrMulti ? 'block' : 'none';
+    onQFormTypeChange();
+    setTimeout(() => {
+      const answerData = q.answer;
+      if (q.type === 'choice') {
+        const radios = document.querySelectorAll('input[name="qform-choice"]');
+        radios.forEach(r => { if (r.value === answerData) r.checked = true; });
+      } else if (q.type === 'multiple') {
+        let ansArr = [];
+        try { ansArr = JSON.parse(answerData); } catch { ansArr = []; }
+        document.querySelectorAll('input[name="qform-multi"]').forEach(cb => { cb.checked = ansArr.includes(cb.value); });
+      } else if (q.type === 'fill') {
+        let fillVal = answerData;
+        try { const parsed = JSON.parse(answerData); if (Array.isArray(parsed)) fillVal = parsed.join('||'); } catch { }
+        const inp = document.getElementById('qform-fill-answer');
+        if (inp) inp.value = fillVal;
+      } else if (q.type === 'judge') {
+        const radios = document.querySelectorAll('input[name="qform-judge"]');
+        radios.forEach(r => { if (r.value === answerData) r.checked = true; });
+      }
+    }, 50);
+    new bootstrap.Modal(document.getElementById('questionFormModal')).show();
+  } catch (err) {
+    alert('加载题目失败: ' + err.message);
+  }
+}
+
+function showDeleteQuestion(bankId, questionId) {
+  _deleteBankId = bankId;
+  _deleteQuestionId = questionId;
+  document.getElementById('delete-confirm-msg').textContent = '确定删除这道题目吗？该操作不可恢复。';
+  new bootstrap.Modal(document.getElementById('deleteConfirmModal')).show();
+}
+
+async function doDeleteQuestion() {
+  if (!_deleteQuestionId) return;
+  const qid = _deleteQuestionId;
+  _deleteQuestionId = null;
+  const btn = document.getElementById('delete-confirm-btn');
+  btn.disabled = true;
+  try {
+    await api.deleteQuestion(qid);
+    bootstrap.Modal.getInstance(document.getElementById('deleteConfirmModal')).hide();
+    router.resolve();
+  } catch (err) {
+    alert('删除失败: ' + err.message);
+  } finally {
+    btn.disabled = false;
+  }
+}
+
+function onQFormTypeChange() {
+  const type = document.getElementById('qform-type').value;
+  const optionsGroup = document.getElementById('qform-options-group');
+  const answerGroup = document.getElementById('qform-answer-group');
+  if (type === 'choice' || type === 'multiple') {
+    optionsGroup.style.display = 'block';
+  } else {
+    optionsGroup.style.display = 'none';
+  }
+  if (type === 'choice') {
+    const optsText = document.getElementById('qform-options').value;
+    const lines = optsText.split('\n').filter(l => l.trim());
+    answerGroup.innerHTML = lines.map((line, i) => {
+      const letter = String.fromCharCode(65 + i);
+      return `<div class="form-check">
+        <input class="form-check-input" type="radio" name="qform-choice" id="qc-${letter}" value="${letter}">
+        <label class="form-check-label" for="qc-${letter}">${escHtml(line.trim())}</label>
+      </div>`;
+    }).join('') || '<div class="text-muted small">请先在"选项"中输入内容</div>';
+  } else if (type === 'multiple') {
+    const optsText = document.getElementById('qform-options').value;
+    const lines = optsText.split('\n').filter(l => l.trim());
+    answerGroup.innerHTML = lines.map((line, i) => {
+      const letter = String.fromCharCode(65 + i);
+      return `<div class="form-check">
+        <input class="form-check-input" type="checkbox" name="qform-multi" id="qm-${letter}" value="${letter}">
+        <label class="form-check-label" for="qm-${letter}">${escHtml(line.trim())}</label>
+      </div>`;
+    }).join('') || '<div class="text-muted small">请先在"选项"中输入内容</div>';
+  } else if (type === 'fill') {
+    answerGroup.innerHTML = `<input type="text" class="form-control" id="qform-fill-answer" placeholder="填空答案（多空用 || 分隔）">`;
+  } else if (type === 'judge') {
+    answerGroup.innerHTML = `
+      <div class="form-check form-check-inline">
+        <input class="form-check-input" type="radio" name="qform-judge" id="qj-true" value="对">
+        <label class="form-check-label" for="qj-true">对</label>
+      </div>
+      <div class="form-check form-check-inline">
+        <input class="form-check-input" type="radio" name="qform-judge" id="qj-false" value="错">
+        <label class="form-check-label" for="qj-false">错</label>
+      </div>`;
+  }
+}
+
+async function saveQForm() {
+  const bankId = parseInt(document.getElementById('qform-bank-id').value);
+  const questionId = document.getElementById('qform-question-id').value;
+  const isEdit = !!questionId;
+  const type = document.getElementById('qform-type').value;
+  const chapter = document.getElementById('qform-chapter').value || null;
+  const content = document.getElementById('qform-content').value;
+  const optionsText = document.getElementById('qform-options').value;
+  const analysis = document.getElementById('qform-analysis').value || null;
+
+  if (!content.trim()) { alert('请输入题目内容'); return; }
+
+  let options = null;
+  if (type === 'choice' || type === 'multiple') {
+    options = optionsText.split('\n').filter(l => l.trim());
+    if (options.length < 2) { alert(`${type === 'choice' ? '选择' : '多选'}题至少需要 2 个选项`); return; }
+  }
+
+  let answer;
+  if (type === 'choice') {
+    const selected = document.querySelector('input[name="qform-choice"]:checked');
+    if (!selected) { alert('请选择正确答案'); return; }
+    answer = selected.value;
+  } else if (type === 'multiple') {
+    const checked = document.querySelectorAll('input[name="qform-multi"]:checked');
+    if (checked.length === 0) { alert('请至少选择一个正确答案'); return; }
+    answer = Array.from(checked).map(cb => cb.value);
+  } else if (type === 'fill') {
+    const val = document.getElementById('qform-fill-answer').value;
+    if (!val.trim()) { alert('请输入答案'); return; }
+    if (val.includes('||')) {
+      answer = val.split('||').map(s => s.trim());
+    } else {
+      answer = val.trim();
+    }
+  } else if (type === 'judge') {
+    const selected = document.querySelector('input[name="qform-judge"]:checked');
+    if (!selected) { alert('请选择正确答案'); return; }
+    answer = selected.value;
+  }
+
+  const data = { type, chapter, content, options, answer, analysis };
+
+  const btn = document.getElementById('qform-save-btn');
+  btn.disabled = true;
+  try {
+    if (isEdit) {
+      await api.updateQuestion(parseInt(questionId), data);
+    } else {
+      await api.createQuestion(bankId, data);
+    }
+    bootstrap.Modal.getInstance(document.getElementById('questionFormModal')).hide();
+    router.resolve();
+  } catch (err) {
+    alert('保存失败: ' + err.message);
+  } finally {
+    btn.disabled = false;
+  }
+}
+
+async function showBankEditModal(bankId) {
+  try {
+    const bank = await api.getBank(bankId);
+    document.getElementById('bankedit-id').value = bankId;
+    document.getElementById('bankedit-title').value = bank.title;
+    document.getElementById('bankedit-description').value = bank.description || '';
+    new bootstrap.Modal(document.getElementById('bankEditModal')).show();
+  } catch (err) {
+    alert('加载题库信息失败: ' + err.message);
+  }
+}
+
+async function saveBankEdit() {
+  const bankId = parseInt(document.getElementById('bankedit-id').value);
+  const title = document.getElementById('bankedit-title').value;
+  const description = document.getElementById('bankedit-description').value;
+  if (!title.trim()) { alert('题库标题不能为空'); return; }
+  try {
+    await api.updateBank(bankId, { title, description: description || null });
+    bootstrap.Modal.getInstance(document.getElementById('bankEditModal')).hide();
+    router.resolve();
+  } catch (err) {
+    alert('保存失败: ' + err.message);
+  }
 }
 
 async function init() {

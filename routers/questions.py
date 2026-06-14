@@ -1,0 +1,146 @@
+import json
+from fastapi import APIRouter, Depends, HTTPException, status
+from sqlalchemy.orm import Session
+from sqlalchemy import func
+from database import get_db
+from models import User, QuestionBank, Question
+from schemas import QuestionCreate, QuestionUpdate, QuestionOut
+from auth import get_current_user
+
+router = APIRouter(prefix="/api", tags=["题目"])
+
+VALID_TYPES = {"choice", "fill", "judge", "multiple"}
+VALID_JUDGE_ANSWERS = {"对", "错"}
+
+
+def _validate_question(type_, content, options, answer):
+    errors = []
+    if type_ not in VALID_TYPES:
+        errors.append(f"题型必须为 choice/fill/judge/multiple，得到 '{type_}'")
+        return errors
+    if not content or not content.strip():
+        errors.append("题目内容不能为空")
+    if type_ == "choice":
+        if not options or len(options) < 2:
+            errors.append("选择题至少需要 2 个选项")
+        if not answer or not isinstance(answer, str):
+            errors.append("选择题答案必须为字符串（如 'A'）")
+    elif type_ == "fill":
+        if isinstance(answer, list):
+            if any(not a or not a.strip() for a in answer):
+                errors.append("填空题答案数组不能包含空值")
+        elif not answer or not isinstance(answer, str) or not answer.strip():
+            errors.append("填空题答案不能为空")
+    elif type_ == "judge":
+        if answer not in VALID_JUDGE_ANSWERS:
+            errors.append(f"判断题答案必须为'对'或'错'，得到 '{answer}'")
+    elif type_ == "multiple":
+        if not options or len(options) < 2:
+            errors.append("多选题至少需要 2 个选项")
+        if not isinstance(answer, list) or len(answer) < 1:
+            errors.append("多选题答案必须为非空数组（如 ['A', 'C']）")
+    return errors
+
+
+def _question_to_out(q: Question) -> QuestionOut:
+    return QuestionOut(
+        id=q.id, type=q.type, chapter=q.chapter, content=q.content,
+        options=q.options, answer=q.answer, analysis=q.analysis,
+        sort_order=q.sort_order,
+    )
+
+
+@router.post("/question-banks/{bank_id}/questions", response_model=QuestionOut, status_code=201)
+def create_question(
+    bank_id: int, data: QuestionCreate,
+    user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    bank = db.query(QuestionBank).filter(
+        QuestionBank.id == bank_id, QuestionBank.user_id == user.id
+    ).first()
+    if not bank:
+        raise HTTPException(status_code=404, detail="题库不存在")
+
+    errors = _validate_question(data.type, data.content, data.options, data.answer)
+    if errors:
+        raise HTTPException(status_code=400, detail="; ".join(errors))
+
+    max_order = db.query(func.max(Question.sort_order)).filter(
+        Question.bank_id == bank_id
+    ).scalar() or -1
+
+    options_str = json.dumps(data.options, ensure_ascii=False) if data.options else None
+    answer_str = json.dumps(data.answer, ensure_ascii=False) if isinstance(data.answer, list) else data.answer
+
+    question = Question(
+        bank_id=bank_id, type=data.type, chapter=data.chapter or None,
+        content=data.content, options=options_str, answer=answer_str,
+        analysis=data.analysis or None, sort_order=max_order + 1,
+    )
+    db.add(question)
+    db.commit()
+    db.refresh(question)
+    return _question_to_out(question)
+
+
+@router.put("/questions/{question_id}", response_model=QuestionOut)
+def update_question(
+    question_id: int, data: QuestionUpdate,
+    user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    question = db.query(Question).join(QuestionBank).filter(
+        Question.id == question_id,
+        QuestionBank.user_id == user.id,
+    ).first()
+    if not question:
+        raise HTTPException(status_code=404, detail="题目不存在")
+
+    new_type = data.type if data.type is not None else question.type
+    new_content = data.content if data.content is not None else question.content
+    new_chapter = data.chapter if data.chapter is not None else question.chapter
+    new_analysis = data.analysis if data.analysis is not None else question.analysis
+
+    if new_type in ("fill", "judge"):
+        new_options = None
+    elif data.options is not None:
+        new_options = data.options
+    else:
+        new_options = json.loads(question.options) if question.options else None
+
+    if data.answer is not None:
+        new_answer = data.answer
+    else:
+        new_answer = json.loads(question.answer) if (question.answer and question.answer.startswith("[")) else question.answer
+
+    errors = _validate_question(new_type, new_content, new_options, new_answer)
+    if errors:
+        raise HTTPException(status_code=400, detail="; ".join(errors))
+
+    question.type = new_type
+    question.content = new_content
+    question.chapter = new_chapter
+    question.analysis = new_analysis
+    question.options = json.dumps(new_options, ensure_ascii=False) if new_options else None
+    question.answer = json.dumps(new_answer, ensure_ascii=False) if isinstance(new_answer, list) else new_answer
+
+    db.commit()
+    db.refresh(question)
+    return _question_to_out(question)
+
+
+@router.delete("/questions/{question_id}", status_code=204)
+def delete_question(
+    question_id: int,
+    user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    question = db.query(Question).join(QuestionBank).filter(
+        Question.id == question_id,
+        QuestionBank.user_id == user.id,
+    ).first()
+    if not question:
+        raise HTTPException(status_code=404, detail="题目不存在")
+    db.delete(question)
+    db.commit()
