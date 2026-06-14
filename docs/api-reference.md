@@ -112,7 +112,7 @@
 }
 ```
 
-注意：`options` 和 `answer` 是原始数据库值，未反序列化。
+注意：`options` 和 `answer` 在本题库详情接口中为原始数据库值，未反序列化。在答题预览（`/api/exam/:id/preview`）和结果（`/api/exam/:id/result`）接口中，`options` 会反序列化为 JSON 数组。
 
 ---
 
@@ -219,8 +219,10 @@
 | `types` | 题型筛选，缺省返回全部 |
 | `question_count` | 随机抽取题数，null 或 ≥ 可用题数则全部 |
 | `timer_mode` | `"per_question"` 单题计时 / `"elapsed"` 整卷计时 |
-| `choice_timeout` | 选择题倒计时秒数（per_question 模式） |
-| `judge_fill_timeout` | 填空/判断题倒计时秒数 |
+| `choice_timeout` | 选择题倒计时秒数（per_question 模式，默认 30） |
+| `judge_fill_timeout` | 填空/判断题倒计时秒数（默认 60） |
+
+多选题倒计时参数 `multi_choice_timeout`（默认 45）为前端独立管理，不传送至后端。
 
 **响应 (200)：**
 ```json

@@ -185,10 +185,12 @@ if question_ids: 过滤到选中的子集
 | ExamRecord | bank_ids | `"[1, 2, 3]"` | 总是 JSON |
 | ExamRecord | question_ids | `"[4, 7, 12]"` 或 `null` | 非 null 则 JSON |
 | Question | options | `'["A. 1", "B. 2"]'` 或 `null` | 非 null 则 JSON |
-| Question | answer | 多空填空时 `'["纸","印刷"]'`；其他为普通字符串 | `startswith("[")` |
-| AnswerRecord | user_answer | 列表答案时 `'["答案1","答案2"]'`；否则原始字符串 | `startswith("[")` |
+| Question | answer | 多空填空时 `'["纸","印刷"]'`；其他为普通字符串 | `parse_json_field()` |
+| AnswerRecord | user_answer | 列表答案时 `'["答案1","答案2"]'`；否则原始字符串 | `parse_json_field()` |
 
 **判断规律**：所有列表字段序列化后以 `[` 开头。填空多空场景下 `answer` 和 `user_answer` 都用 JSON 数组。
+
+解析逻辑统一封装在 `utils.parse_json_field()` 中，不再在各路由中重复编写 `startswith("[")` + `json.loads` + `try/except`。
 
 ---
 
@@ -218,9 +220,9 @@ if question_ids: 过滤到选中的子集
 
 | 变量 | 用途 |
 |------|------|
-| `window.apiToken` | JWT token |
-| `window.currentUser` | 当前用户信息 |
-| `window.examCurrentIndex` | 答题中当前题号（1-based） |
+| `api.token` | JWT token（存于 `localStorage`） |
+| `state.user` | 当前用户信息 |
+| `examCurrentIndex` | 答题中当前题号（0-based，全局变量） |
 
 `api.js` 封装所有 `fetch` 调用，自动附带 `Authorization` header，401 时跳转登录页。
 

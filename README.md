@@ -83,6 +83,7 @@ docker compose up -d
 | `/api/question-banks/{id}` | GET | 题库详情 |
 | `/api/question-banks/import` | POST | 导入题库 |
 | `/api/question-banks/import-multiple` | POST | 批量导入 |
+| `/api/question-banks/{id}` | DELETE | 删除题库 |
 | `/api/review/questions` | POST | 背题列表 |
 | `/api/review/mark` | POST | 标记掌握状态 |
 | `/api/review/stats` | GET | 背题统计 |
