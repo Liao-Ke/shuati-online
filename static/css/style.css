@@ -463,6 +463,65 @@ h1, h2, h3, h4, h5, h6 {
   }
 }
 
+.review-option {
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 0.6rem 1rem;
+  margin-bottom: 0.4rem;
+  background: #FAFBFC;
+  font-size: 0.95rem;
+  transition: all 0.15s;
+}
+
+.review-option:hover {
+  border-color: var(--primary-light);
+  background: #EFF6FF;
+}
+
+.review-option-correct {
+  border-color: var(--success) !important;
+  background: #F0FDF4 !important;
+  color: #16A34A;
+  font-weight: 600;
+}
+
+.review-answer {
+  font-size: 0.95rem;
+}
+
+.review-analysis {
+  font-size: 0.9rem;
+  color: var(--text-muted);
+  padding-top: 0.5rem;
+  border-top: 1px dashed var(--border);
+}
+
+.history-options {
+  margin: 0.5rem 0;
+}
+
+.history-option {
+  padding: 0.4rem 0.75rem;
+  border-radius: 6px;
+  border: 1px solid var(--border);
+  margin-bottom: 0.25rem;
+  font-size: 0.9rem;
+}
+
+.history-option.option-correct {
+  border-color: var(--success);
+  background: #F0FDF4;
+  color: #16A34A;
+  font-weight: 600;
+}
+
+.history-option.option-wrong {
+  border-color: var(--danger);
+  background: #FEF2F2;
+  color: #DC2626;
+  font-weight: 600;
+}
+
 .exam-pause-overlay {
   position: fixed;
   inset: 0;

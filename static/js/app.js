@@ -296,6 +296,7 @@ router.add('/banks/:id', async ({ id }) => {
 });
 
 router.add('/exam/setup', async () => {
+  sessionStorage.removeItem('activeExamId');
   showNav();
   render('<div class="text-center py-5"><div class="spinner-border"></div></div>');
   try {
@@ -379,7 +380,10 @@ router.add('/exam/setup', async () => {
 
 router.add('/exam', async () => {
   showNav();
-  if (!examId) { router.navigate('/exam/setup'); return; }
+  if (!examId) {
+    const saved = sessionStorage.getItem('activeExamId');
+    if (saved) { examId = parseInt(saved); } else { router.navigate('/exam/setup'); return; }
+  }
   render(`
     <div class="exam-layout">
       <div class="exam-main">
@@ -438,30 +442,38 @@ function examKeyHandler(e) {
 }
 
 router.add('/result/:id', async ({ id }) => {
+  sessionStorage.removeItem('activeExamId');
   showNav();
   render('<div class="text-center py-5"><div class="spinner-border"></div></div>');
   try {
     const result = await api.getExamResult(id);
-    const acc = (result.accuracy * 100).toFixed(0);
+    const hasAnswers = result.answers.length > 0;
+    const acc = hasAnswers ? (result.accuracy * 100).toFixed(0) : '—';
+    const cc = hasAnswers ? result.correct_count : '—';
+    const wc = hasAnswers ? result.wrong_count : '—';
     render(`
       <div class="page-header text-center">
         <h2 class="result-title">答题完成！</h2>
         <div class="result-score">${acc}<small>分</small></div>
       </div>
       <div class="row g-3 mb-4">
-        <div class="col-3 col-md-3"><div class="stat-card"><div class="stat-number text-success">${result.correct_count}</div><div class="stat-label">正确</div></div></div>
-        <div class="col-3 col-md-3"><div class="stat-card"><div class="stat-number text-danger">${result.wrong_count}</div><div class="stat-label">错误</div></div></div>
+        <div class="col-3 col-md-3"><div class="stat-card"><div class="stat-number text-success">${cc}</div><div class="stat-label">正确</div></div></div>
+        <div class="col-3 col-md-3"><div class="stat-card"><div class="stat-number text-danger">${wc}</div><div class="stat-label">错误</div></div></div>
         <div class="col-3 col-md-3"><div class="stat-card"><div class="stat-number">${acc}%</div><div class="stat-label">正确率</div></div></div>
         <div class="col-3 col-md-3"><div class="stat-card"><div class="stat-number">${result.duration_seconds}s</div><div class="stat-label">用时</div></div></div>
       </div>
       <div id="result-answers"></div>
       <div class="d-flex gap-2 mt-3">
         <a href="#/exam/setup" class="btn btn-primary">再来一次</a>
-        <a href="#/history/${result.exam_id}" class="btn btn-outline-primary">查看详情</a>
+        ${hasAnswers ? `<a href="#/history/${result.exam_id}" class="btn btn-outline-primary">查看详情</a>` : ''}
         <a href="#/dashboard" class="btn btn-outline-secondary">返回首页</a>
       </div>
     `);
     const container = document.getElementById('result-answers');
+    if (!hasAnswers) {
+      container.innerHTML = '<div class="empty-state"><p>还没有作答记录</p></div>';
+      return;
+    }
     result.answers.forEach((a, i) => {
       const icon = a.is_correct ? '<span class="text-success">\u2713</span>' : '<span class="text-danger">\u2717</span>';
       const userAns = Array.isArray(a.user_answer) ? a.user_answer.join(', ') : a.user_answer || '(未作答)';
@@ -473,6 +485,7 @@ router.add('/result/:id', async ({ id }) => {
             <small class="text-muted">${a.time_spent || 0}s</small>
           </div>
           <p class="mb-1 mt-1">${escHtml(a.content)}</p>
+          ${renderOptions(a.options, a.user_answer, a.correct_answer)}
           <p class="mb-0 small"><span class="text-danger">你的答案: ${escHtml(userAns)}</span></p>
           ${!a.is_correct ? `<p class="mb-0 small text-success">正确答案: ${escHtml(correctAns)}</p>` : ''}
           ${a.analysis ? `<p class="mb-0 small text-muted mt-1">解析: ${escHtml(a.analysis)}</p>` : ''}
@@ -523,16 +536,22 @@ router.add('/history/:id', async ({ id }) => {
   render('<div class="text-center py-5"><div class="spinner-border"></div></div>');
   try {
     const result = await api.getHistoryDetail(id);
-    const acc = (result.accuracy * 100).toFixed(0);
+    const hasAnswers = result.answers.length > 0;
+    const acc = hasAnswers ? (result.accuracy * 100).toFixed(0) : '—';
+    const cc = hasAnswers ? result.correct_count : '—';
     render(`
       <div class="page-header">
         <h2><a href="#/history" class="text-decoration-none me-2">&larr;</a>练习回顾</h2>
-        <p class="text-muted">${result.correct_count}/${result.total_count} 正确 · ${acc}% · ${result.duration_seconds}s</p>
+        <p class="text-muted">${cc}/${hasAnswers ? result.total_count : '—'} 正确 · ${acc}% · ${result.duration_seconds}s</p>
       </div>
       <div id="history-answers"></div>
       <div class="mt-3"><a href="#/exam/setup" class="btn btn-primary">重新练习</a></div>
     `);
     const container = document.getElementById('history-answers');
+    if (!hasAnswers) {
+      container.innerHTML = '<div class="empty-state"><p>该练习还没有作答记录</p></div>';
+      return;
+    }
     result.answers.forEach((a, i) => {
       const icon = a.is_correct ? '<span class="text-success">\u2713</span>' : '<span class="text-danger">\u2717</span>';
       const userAns = Array.isArray(a.user_answer) ? a.user_answer.join(', ') : a.user_answer || '(未作答)';
@@ -544,6 +563,7 @@ router.add('/history/:id', async ({ id }) => {
             <small class="text-muted">${a.time_spent || 0}s</small>
           </div>
           <p class="mb-1 mt-1">${escHtml(a.content)}</p>
+          ${renderOptions(a.options, a.user_answer, a.correct_answer)}
           <p class="mb-0 small"><span class="text-danger">你的答案: ${escHtml(userAns)}</span></p>
           ${!a.is_correct ? `<p class="mb-0 small text-success">正确答案: ${escHtml(correctAns)}</p>` : ''}
           ${a.analysis ? `<p class="mb-0 small text-muted mt-1">解析: ${escHtml(a.analysis)}</p>` : ''}
@@ -578,6 +598,7 @@ router.add('/wrong-answers', async () => {
         container.innerHTML += `
           <div class="answer-review-item wrong">
             <p class="mb-1"><span class="badge bg-danger me-1">\u2717</span> ${escHtml(w.content)}</p>
+            ${renderOptions(w.options, w.user_answer, w.correct_answer)}
             <p class="mb-0 small text-danger">你的答案: ${escHtml(userAns)}</p>
             <p class="mb-0 small text-success">正确答案: ${escHtml(correctAns)}</p>
             ${w.analysis ? `<p class="mb-0 small text-muted mt-1">解析: ${escHtml(w.analysis)}</p>` : ''}
@@ -594,6 +615,7 @@ let reviewQuestions = [];
 let reviewFilter = null;
 
 router.add('/review/setup', async () => {
+  sessionStorage.removeItem('reviewFilter');
   showNav();
   render('<div class="text-center py-5"><div class="spinner-border"></div></div>');
   try {
@@ -644,6 +666,12 @@ router.add('/review/setup', async () => {
         </div>
       `;
     });
+    const firstCard = bankSelect.querySelector('.bank-check-card');
+    if (firstCard) {
+      firstCard.classList.add('selected');
+      firstCard.querySelector('.review-bank-checkbox').checked = true;
+      document.getElementById('review-selected-count').textContent = '已选 1 个题库';
+    }
   } catch {
     render('<div class="alert alert-danger">加载失败</div>');
   }
@@ -664,12 +692,16 @@ async function startReview() {
   const chapter = document.getElementById('review-chapter-select').value || null;
   const showReviewingOnly = document.getElementById('review-show-reviewing').checked;
   reviewFilter = { bank_ids: selectedBanks, types, chapter, show_reviewing_only: showReviewingOnly };
+  sessionStorage.setItem('reviewFilter', JSON.stringify(reviewFilter));
   router.navigate('/review');
 }
 
 router.add('/review', async () => {
   showNav();
-  if (!reviewFilter) { router.navigate('/review/setup'); return; }
+  if (!reviewFilter) {
+    const saved = sessionStorage.getItem('reviewFilter');
+    if (saved) { reviewFilter = JSON.parse(saved); } else { router.navigate('/review/setup'); return; }
+  }
   render('<div class="text-center py-5"><div class="spinner-border"></div></div>');
   try {
     reviewQuestions = await api.getReviewQuestions(reviewFilter);
@@ -715,10 +747,18 @@ function renderReviewPage() {
     if (q.type === 'choice' && q.options) {
       try {
         const opts = JSON.parse(q.options);
-        opts.forEach(opt => {
-          optionsHtml += `<div class="review-option">${escHtml(opt)}</div>`;
+        const labels = 'ABCDEFGH';
+        opts.forEach((opt, i) => {
+          const cls = labels[i] === q.answer ? 'review-option review-option-correct' : 'review-option';
+          optionsHtml += `<div class="${cls}">${labels[i]}. ${escHtml(opt)}</div>`;
         });
       } catch { /* ignore */ }
+    } else if (q.type === 'judge') {
+      const correct = q.answer === '对' ? 'A' : 'B';
+      optionsHtml = ['对', '错'].map((v, i) => {
+        const cls = (i === 0 ? 'A' : 'B') === correct ? 'review-option review-option-correct' : 'review-option';
+        return `<div class="${cls}">${i === 0 ? 'A' : 'B'}. ${v}</div>`;
+      }).join('');
     }
     const correctDisplay = q.answer || '';
     const analysisDisplay = q.analysis ? `<div class="review-analysis mt-2">解析：${escHtml(q.analysis)}</div>` : '';
@@ -816,6 +856,20 @@ function logout() {
   router.navigate('/login');
 }
 
+function renderOptions(options, userAnswer, correctAnswer) {
+  if (!options || options.length === 0) return '';
+  const labels = 'ABCDEFGH';
+  const ua = String(userAnswer || '');
+  const ca = String(correctAnswer || '');
+  return '<div class="history-options">' + options.map((opt, i) => {
+    const letter = labels[i];
+    let cls = 'history-option';
+    if (letter === ca) cls += ' option-correct';
+    else if (letter === ua) cls += ' option-wrong';
+    return `<div class="${cls}">${letter}. ${escHtml(opt)}</div>`;
+  }).join('') + '</div>';
+}
+
 function selectMode(el) {
   $$('.mode-card').forEach(c => c.classList.remove('active'));
   el.classList.add('active');
@@ -843,6 +897,7 @@ async function startExam() {
     const res = await api.startExam({ bank_ids: selectedBanks, mode, types, question_count: questionCount, choice_timeout: choiceTimeout, judge_fill_timeout: fillTimeout });
     examId = res.exam_id;
     examTotalCount = res.total_count;
+    sessionStorage.setItem('activeExamId', examId);
     router.navigate('/exam');
   } catch (err) {
     alert(err.message);
@@ -1015,6 +1070,7 @@ async function finishExam() {
   clearInterval(examTimerInterval);
   try {
     await api.finishExam(examId);
+    sessionStorage.removeItem('activeExamId');
     document.removeEventListener('keydown', examKeyHandler);
     router.navigate(`/result/${examId}`);
   } catch (err) {
@@ -1269,6 +1325,10 @@ function setQuickCount(n) {
 }
 
 async function init() {
+  const savedExamId = sessionStorage.getItem('activeExamId');
+  if (savedExamId) examId = parseInt(savedExamId);
+  const savedFilter = sessionStorage.getItem('reviewFilter');
+  if (savedFilter) reviewFilter = JSON.parse(savedFilter);
   const authed = await checkAuth();
   if (!authed && !location.hash.match(/^\#\/(login|register)$/)) {
     router.navigate('/login');
