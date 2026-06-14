@@ -1,4 +1,6 @@
 .superpowers/
+.codex/
+.pi/
 exam.db
 __pycache__/
 *.pyc
