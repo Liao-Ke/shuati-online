@@ -232,6 +232,45 @@ def submit_answer(data: AnswerSubmit, user: User = Depends(get_current_user), db
     )
 
 
+@router.get("/{exam_id}/preview")
+def exam_preview(
+    exam_id: int,
+    user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    exam = db.query(ExamRecord).filter(
+        ExamRecord.id == exam_id, ExamRecord.user_id == user.id
+    ).first()
+    if not exam:
+        raise HTTPException(status_code=404, detail="练习不存在")
+
+    all_questions, answered_map = _load_all_exam_questions(exam, db)
+    questions = []
+    for i, q in enumerate(all_questions):
+        record = answered_map.get(q.id)
+        correct_answer = json.loads(q.answer) if q.answer and q.answer.startswith("[") else q.answer
+        user_answer = None
+        if record and record.user_answer:
+            try:
+                user_answer = json.loads(record.user_answer) if record.user_answer.startswith("[") else record.user_answer
+            except (json.JSONDecodeError, TypeError):
+                user_answer = record.user_answer
+        questions.append({
+            "index": i,
+            "id": q.id,
+            "type": q.type,
+            "chapter": q.chapter,
+            "content": q.content,
+            "options": json.loads(q.options) if q.options else None,
+            "answer": correct_answer,
+            "analysis": q.analysis,
+            "user_answer": user_answer,
+            "is_answered": record is not None,
+            "is_correct": record.is_correct if record else None,
+        })
+    return {"total_count": len(questions), "questions": questions}
+
+
 @router.post("/{exam_id}/finish")
 def finish_exam(
     exam_id: int,

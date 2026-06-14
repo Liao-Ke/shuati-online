@@ -542,6 +542,105 @@ h1, h2, h3, h4, h5, h6 {
   margin-bottom: 0.5rem;
 }
 
+.full-preview {
+  max-width: 100%;
+}
+
+.preview-card {
+  background: var(--bg-card);
+  border-radius: 8px;
+  box-shadow: 0 1px 3px rgba(0,0,0,0.1);
+  padding: 1rem 1.25rem;
+  margin-bottom: 0.75rem;
+  border-left: 4px solid var(--border);
+  transition: all 0.15s;
+}
+
+.preview-card-correct {
+  border-left-color: var(--success);
+}
+
+.preview-card-wrong {
+  border-left-color: var(--danger);
+}
+
+.preview-card-empty {
+  border-left-color: var(--border);
+}
+
+.preview-card-header {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  margin-bottom: 0.5rem;
+  flex-wrap: wrap;
+}
+
+.preview-card-num {
+  font-weight: 700;
+  font-size: 0.9rem;
+}
+
+.preview-card-status {
+  margin-left: auto;
+  font-weight: 600;
+  font-size: 0.85rem;
+}
+
+.preview-card-body {
+  font-size: 1rem;
+  line-height: 1.6;
+}
+
+.preview-card-options {
+  margin-top: 0.5rem;
+}
+
+.preview-option {
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 0.4rem 0.75rem;
+  margin-bottom: 0.25rem;
+  font-size: 0.9rem;
+  transition: all 0.1s;
+}
+
+.preview-option:hover {
+  border-color: var(--primary-light);
+  background: #EFF6FF;
+}
+
+.preview-option.preview-option-correct {
+  border-color: var(--success);
+  background: #F0FDF4;
+  color: #16A34A;
+  font-weight: 600;
+}
+
+.preview-option.preview-option-wrong {
+  border-color: var(--danger);
+  background: #FEF2F2;
+  color: #DC2626;
+  font-weight: 600;
+}
+
+.preview-fill-input {
+  display: inline-block;
+  width: 120px;
+  text-align: center;
+}
+
+.preview-card-analysis {
+  margin-top: 0.75rem;
+  padding: 0.6rem 0.75rem;
+  background: #FFF7ED;
+  border: 1px solid #FED7AA;
+  border-radius: 6px;
+  font-size: 0.9rem;
+  color: #9A3412;
+  line-height: 1.5;
+}
+
 .exam-pause-text {
   font-size: 2rem;
   font-weight: 700;

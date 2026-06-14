@@ -59,6 +59,7 @@ const api = {
     });
   },
   finishExam(examId) { return this.post(`/exam/${examId}/finish`, {}); },
+  getExamPreview(examId) { return this.get(`/exam/${examId}/preview`); },
   getExamResult(examId) { return this.get(`/exam/${examId}/result`); },
 
   getHistory(page = 1) { return this.get(`/history?page=${page}&page_size=20`); },

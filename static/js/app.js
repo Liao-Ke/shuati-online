@@ -45,6 +45,7 @@ let examCurrentIndex = 0;
 let examProgress = null;
 let examPaused = false;
 let examPauseRemaining = 0;
+let examFullPreview = false;
 
 async function checkAuth() {
   if (!api.token) return false;
@@ -391,6 +392,7 @@ router.add('/exam', async () => {
           <div class="d-flex justify-content-between align-items-center mb-2">
             <span id="exam-progress-text">第 0/0 题</span>
             <div class="d-flex align-items-center gap-2">
+              <button class="btn btn-outline-secondary btn-sm" id="mode-toggle-btn" onclick="toggleExamMode()">📋 整卷模式</button>
               <button class="btn btn-outline-secondary btn-sm" id="pause-btn" onclick="pauseExam()">⏸ 暂停</button>
               <button class="btn btn-outline-danger btn-sm" id="finish-btn" onclick="finishExam()">✕ 结束</button>
             </div>
@@ -973,6 +975,7 @@ async function loadQuestionByIndex(index) {
             <h3>${icon} ${data.is_correct ? '回答正确！' : '回答错误'}</h3>
             <p class="mb-1">你的答案: <strong>${escHtml(data.user_answer || '(未作答)')}</strong></p>
             <p class="mb-1">正确答案: <strong>${escHtml(data.correct_answer)}</strong></p>
+            ${q.analysis ? `<div class="mt-2 pt-2 border-top border-light">📖 ${escHtml(q.analysis)}</div>` : ''}
           </div>
         </div>
       `;
@@ -1081,6 +1084,201 @@ async function finishExam() {
 function parseTime(str) {
   const parts = str.split(':');
   return parseInt(parts[0]) * 60 + parseInt(parts[1]);
+}
+
+async function toggleExamMode() {
+  examFullPreview = !examFullPreview;
+  const btn = document.getElementById('mode-toggle-btn');
+  if (examFullPreview) {
+    btn.textContent = '📖 单题模式';
+    document.getElementById('prev-btn').style.display = 'none';
+    document.getElementById('next-btn').style.display = 'none';
+    document.getElementById('exam-nav-hint').style.display = 'none';
+    document.getElementById('exam-timer').style.display = 'none';
+    document.querySelector('.exam-progress').style.display = 'none';
+    document.getElementById('exam-progress-text').textContent = '整卷模式';
+    await renderFullPreview();
+  } else {
+    btn.textContent = '📋 整卷模式';
+    document.getElementById('prev-btn').style.display = '';
+    document.getElementById('next-btn').style.display = '';
+    document.getElementById('exam-nav-hint').style.display = '';
+    document.getElementById('exam-timer').style.display = '';
+    document.querySelector('.exam-progress').style.display = '';
+    document.getElementById('exam-progress-text').textContent = `第 ${examCurrentIndex + 1}/${examTotalCount} 题`;
+    loadQuestionByIndex(examCurrentIndex);
+  }
+}
+
+async function renderFullPreview() {
+  document.getElementById('exam-content').innerHTML = '<div class="text-center py-5"><div class="spinner-border"></div></div>';
+  try {
+    const data = await api.getExamPreview(examId);
+    examTotalCount = data.total_count;
+    examProgress = { total_count: data.total_count, answers: data.questions.filter(q => q.is_answered).map(q => ({ index: q.index, is_correct: q.is_correct })) };
+    renderQuestionGrid();
+    let html = '<div class="full-preview">';
+    const typeMap = { choice: '选择题', fill: '填空题', judge: '判断题' };
+    data.questions.forEach((q) => {
+      const statusCls = q.is_answered ? (q.is_correct ? 'preview-card-correct' : 'preview-card-wrong') : 'preview-card-empty';
+      const statusText = q.is_answered ? (q.is_correct ? '✓ 正确' : '✗ 错误') : '未作答';
+      let optionsHtml = '';
+      if (q.type === 'choice' && q.options) {
+        const labels = 'ABCDEFGH';
+        q.options.forEach((opt, i) => {
+          const letter = labels[i];
+          let cls = 'preview-option';
+          if (q.is_answered) {
+            if (letter === q.answer) cls += ' preview-option-correct';
+            else if (letter === q.user_answer) cls += ' preview-option-wrong';
+          }
+          optionsHtml += `<div class="${cls}" onclick="submitInlineChoice(${examId}, ${q.id}, ${q.index}, '${letter}')" ${q.is_answered ? '' : 'style="cursor:pointer"'}>${letter}. ${escHtml(opt)}</div>`;
+        });
+      } else if (q.type === 'judge') {
+        if (q.is_answered) {
+          const labels = { '对': 'A', '错': 'B' };
+          ['对', '错'].forEach(v => {
+            const letter = labels[v];
+            let cls = 'preview-option';
+            if (letter === q.answer) cls += ' preview-option-correct';
+            else if (letter === q.user_answer) cls += ' preview-option-wrong';
+            optionsHtml += `<div class="${cls}">${letter}. ${v}</div>`;
+          });
+        } else {
+          optionsHtml = `
+            <div class="preview-option" style="cursor:pointer" onclick="submitInlineAnswer(${examId}, ${q.id}, ${q.index}, '\u5bf9')">A. 对</div>
+            <div class="preview-option" style="cursor:pointer" onclick="submitInlineAnswer(${examId}, ${q.id}, ${q.index}, '\u9519')">B. 错</div>
+          `;
+        }
+      } else if (q.type === 'fill' && !q.is_answered) {
+        const multi = Array.isArray(q.answer) && q.answer.length > 1;
+        if (multi) {
+          optionsHtml = `<div class="d-flex flex-wrap gap-2 mt-2 justify-content-center">`;
+          q.answer.forEach((_, i) => {
+            optionsHtml += `<input type="text" class="form-control preview-fill-input" id="preview-fill-${q.id}-${i}" data-qid="${q.id}" data-idx="${i}" placeholder="空 ${i + 1}">`;
+          });
+          optionsHtml += `</div><button class="btn btn-primary btn-sm mt-2" onclick="submitInlineFill(${examId}, ${q.id}, ${q.index})">提交</button>`;
+        } else {
+          optionsHtml = `<div class="d-flex gap-2 mt-2 justify-content-center"><input type="text" class="form-control preview-fill-input" id="preview-fill-${q.id}-0" data-qid="${q.id}" data-idx="0" placeholder="请输入答案"><button class="btn btn-primary btn-sm" onclick="submitInlineFill(${examId}, ${q.id}, ${q.index})">提交</button></div>`;
+        }
+      }
+      if (q.type === 'fill' && q.is_answered) {
+        const userAns = Array.isArray(q.user_answer) ? q.user_answer.join(', ') : q.user_answer;
+        const correctAns = Array.isArray(q.answer) ? q.answer.join(', ') : q.answer;
+        optionsHtml = `<div class="text-muted small mt-1">你的答案: <span class="text-danger">${escHtml(userAns)}</span> | 正确答案: <span class="text-success">${escHtml(correctAns)}</span></div>`;
+      }
+      html += `
+        <div class="preview-card ${statusCls}" data-index="${q.index}">
+          <div class="preview-card-header">
+            <span class="preview-card-num">第 ${q.index + 1} 题</span>
+            <span class="badge bg-primary me-1">${typeMap[q.type] || q.type}</span>
+            ${q.chapter ? `<span class="badge bg-secondary">${escHtml(q.chapter)}</span>` : ''}
+            <span class="preview-card-status ${q.is_answered ? (q.is_correct ? 'text-success' : 'text-danger') : 'text-muted'}">${statusText}</span>
+          </div>
+          <div class="preview-card-body">${escHtml(q.content)}</div>
+          ${optionsHtml ? `<div class="preview-card-options">${optionsHtml}</div>` : ''}
+          ${q.is_answered && q.analysis ? `<div class="preview-card-analysis">📖 ${escHtml(q.analysis)}</div>` : ''}
+        </div>
+      `;
+    });
+    html += '</div>';
+    document.getElementById('exam-content').innerHTML = html;
+  } catch {
+    document.getElementById('exam-content').innerHTML = '<div class="alert alert-danger">加载失败</div>';
+  }
+}
+
+async function submitInlineAnswer(examId, questionId, index, answer) {
+  if (examPaused) return;
+  const timeSpent = 1;
+  try {
+    const res = await api.submitAnswer(examId, questionId, answer, timeSpent);
+    examProgress = await api.getExamProgress(examId);
+    renderQuestionGrid();
+    updatePreviewCard(index, questionId, res.is_correct, res.correct_answer, answer, res.analysis);
+  } catch (err) {
+    alert('提交失败: ' + err.message);
+  }
+}
+
+function updatePreviewCard(index, questionId, isCorrect, correctAnswer, userAnswer, analysis) {
+  const card = document.querySelector(`.preview-card[data-index="${index}"]`);
+  if (!card) return;
+  card.classList.remove('preview-card-empty');
+  card.classList.add(isCorrect ? 'preview-card-correct' : 'preview-card-wrong');
+
+  const status = card.querySelector('.preview-card-status');
+  if (status) {
+    status.className = `preview-card-status ${isCorrect ? 'text-success' : 'text-danger'}`;
+    status.textContent = isCorrect ? '✓ 正确' : '✗ 错误';
+  }
+
+  const optionsDiv = card.querySelector('.preview-card-options');
+  if (!optionsDiv) return;
+  const questionData = card.querySelector('.preview-card-body');
+  const type = card.querySelector('.badge.bg-primary');
+  const typeText = type ? type.textContent.trim() : '';
+  let newOptionsHtml = '';
+
+  if (typeText === '选择题' || typeText === 'choice') {
+    const options = optionsDiv.querySelectorAll('.preview-option');
+    const labels = 'ABCDEFGH';
+    const ca = String(correctAnswer || '');
+    const ua = String(userAnswer || '');
+    newOptionsHtml = '';
+    options.forEach((opt, i) => {
+      const letter = labels[i];
+      let cls = 'preview-option';
+      if (letter === ca) cls += ' preview-option-correct';
+      else if (letter === ua) cls += ' preview-option-wrong';
+      const text = opt.textContent.replace(/^[A-Z]\.\s*/, '');
+      newOptionsHtml += `<div class="${cls}">${letter}. ${escHtml(text.trim())}</div>`;
+    });
+  } else if (typeText === '判断题' || typeText === 'judge') {
+    const labels = { '对': 'A', '错': 'B' };
+    const ca = String(correctAnswer || '');
+    const ua = String(userAnswer || '');
+    newOptionsHtml = ['对', '错'].map(v => {
+      const letter = labels[v];
+      let cls = 'preview-option';
+      if (letter === ca) cls += ' preview-option-correct';
+      else if (letter === ua) cls += ' preview-option-wrong';
+      return `<div class="${cls}">${letter}. ${v}</div>`;
+    }).join('');
+  } else {
+    const userAns = Array.isArray(userAnswer) ? userAnswer.join(', ') : userAnswer || '';
+    const correctAns = Array.isArray(correctAnswer) ? correctAnswer.join(', ') : correctAnswer || '';
+    newOptionsHtml = `<div class="text-muted small mt-1">你的答案: <span class="text-danger">${escHtml(userAns)}</span> | 正确答案: <span class="text-success">${escHtml(correctAns)}</span></div>`;
+  }
+
+  optionsDiv.innerHTML = newOptionsHtml;
+
+  const existingAnalysis = card.querySelector('.preview-card-analysis');
+  if (existingAnalysis) existingAnalysis.remove();
+  if (analysis) {
+    const analysisDiv = document.createElement('div');
+    analysisDiv.className = 'preview-card-analysis';
+    analysisDiv.textContent = '📖 ' + analysis;
+    card.appendChild(analysisDiv);
+  }
+}
+
+function submitInlineChoice(examId, questionId, index, answer) {
+  submitInlineAnswer(examId, questionId, index, answer);
+}
+
+async function submitInlineFill(examId, questionId, index) {
+  if (examPaused) return;
+  const inputs = document.querySelectorAll(`.preview-fill-input[data-qid="${questionId}"]`);
+  let answer = null;
+  if (inputs.length === 1) {
+    answer = inputs[0].value.trim() || null;
+  } else {
+    answer = [...inputs].map(inp => inp.value.trim()).filter(v => v !== '');
+    if (answer.length === 0) answer = null;
+  }
+  if (!answer) { alert('请先输入答案'); return; }
+  await submitInlineAnswer(examId, questionId, index, answer);
 }
 
 function selectChoice(el, value) {
