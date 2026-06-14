@@ -126,6 +126,17 @@ class HistoryItem(BaseModel):
         from_attributes = True
 
 
+class ImportResult(BaseModel):
+    success: bool
+    title: str
+    question_count: int = 0
+    error: Optional[str] = None
+
+
+class BatchImportResponse(BaseModel):
+    results: List[ImportResult]
+
+
 class DashboardData(BaseModel):
     total_banks: int = 0
     total_questions: int = 0

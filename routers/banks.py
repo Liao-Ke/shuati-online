@@ -3,10 +3,43 @@ from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.orm import Session
 from database import get_db
 from models import User, QuestionBank, Question
-from schemas import BankImport, BankOut, BankDetail, QuestionOut
+from schemas import BankImport, BankOut, BankDetail, QuestionOut, ImportResult, BatchImportResponse
 from auth import get_current_user
 
 router = APIRouter(prefix="/api/question-banks", tags=["题库"])
+
+VALID_TYPES = {"choice", "fill", "judge"}
+VALID_JUDGE_ANSWERS = {"对", "错"}
+
+
+def validate_bank_import(data: BankImport) -> list[str]:
+    errors = []
+    if not data.title or not data.title.strip():
+        errors.append("题库标题不能为空")
+    if not data.questions or len(data.questions) == 0:
+        errors.append("题库必须包含至少一道题目")
+    for i, q in enumerate(data.questions):
+        prefix = f"第{i + 1}题"
+        if q.type not in VALID_TYPES:
+            errors.append(f"{prefix}: 题型必须为 choice/fill/judge，得到 '{q.type}'")
+            continue
+        if not q.content or not q.content.strip():
+            errors.append(f"{prefix}: 题目内容不能为空")
+        if q.type == "choice":
+            if not q.options or len(q.options) < 2:
+                errors.append(f"{prefix}(选择题): 至少需要 2 个选项")
+            if not q.answer or not isinstance(q.answer, str):
+                errors.append(f"{prefix}(选择题): 答案必须为字符串（如 'A'）")
+        elif q.type == "fill":
+            if isinstance(q.answer, list):
+                if any(not a or not a.strip() for a in q.answer):
+                    errors.append(f"{prefix}(填空题): 答案数组不能包含空值")
+            elif not q.answer or not isinstance(q.answer, str) or not q.answer.strip():
+                errors.append(f"{prefix}(填空题): 答案不能为空")
+        elif q.type == "judge":
+            if q.answer not in VALID_JUDGE_ANSWERS:
+                errors.append(f"{prefix}(判断题): 答案必须为'对'或'错'，得到 '{q.answer}'")
+    return errors
 
 
 @router.get("", response_model=list[BankOut])
@@ -47,8 +80,7 @@ def get_bank(bank_id: int, user: User = Depends(get_current_user), db: Session =
     )
 
 
-@router.post("/import", response_model=BankOut, status_code=201)
-def import_bank(data: BankImport, user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+def _do_import_one(data: BankImport, user: User, db: Session) -> BankOut:
     bank = QuestionBank(user_id=user.id, title=data.title, description=data.description)
     db.add(bank)
     db.flush()
@@ -69,6 +101,44 @@ def import_bank(data: BankImport, user: User = Depends(get_current_user), db: Se
         created_at=bank.created_at.isoformat(),
         updated_at=bank.updated_at.isoformat(),
     )
+
+
+@router.post("/import", response_model=BankOut, status_code=201)
+def import_bank(data: BankImport, user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+    errors = validate_bank_import(data)
+    if errors:
+        raise HTTPException(status_code=400, detail="; ".join(errors))
+    return _do_import_one(data, user, db)
+
+
+@router.post("/import-multiple", response_model=BatchImportResponse)
+def import_banks_multiple(
+    data: list[BankImport],
+    user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    results = []
+    for item in data:
+        errors = validate_bank_import(item)
+        if errors:
+            results.append(ImportResult(
+                success=False, title=item.title or "(未命名)",
+                error="; ".join(errors),
+            ))
+            continue
+        try:
+            out = _do_import_one(item, user, db)
+            results.append(ImportResult(
+                success=True, title=out.title,
+                question_count=out.question_count,
+            ))
+        except Exception as e:
+            db.rollback()
+            results.append(ImportResult(
+                success=False, title=item.title,
+                error=str(e),
+            ))
+    return BatchImportResponse(results=results)
 
 
 @router.delete("/{bank_id}", status_code=204)

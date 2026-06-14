@@ -41,6 +41,7 @@ const api = {
   getBanks() { return this.get('/question-banks'); },
   getBank(id) { return this.get(`/question-banks/${id}`); },
   importBank(data) { return this.post('/question-banks/import', data); },
+  importBanksMultiple(dataList) { return this.post('/question-banks/import-multiple', dataList); },
   deleteBank(id) { return this.delete(`/question-banks/${id}`); },
 
   startExam(data) { return this.post('/exam/start', data); },

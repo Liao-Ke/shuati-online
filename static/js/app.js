@@ -222,8 +222,8 @@ router.add('/banks', async () => {
           <div class="modal-header"><h5 class="modal-title">导入题库</h5><button type="button" class="btn-close" data-bs-dismiss="modal"></button></div>
           <div class="modal-body">
             <div class="mb-3">
-              <label class="form-label">选择 JSON 文件</label>
-              <input type="file" class="form-control" id="import-file" accept=".json">
+              <label class="form-label">选择 JSON 文件（支持多选）</label>
+              <input type="file" class="form-control" id="import-file" accept=".json" multiple>
             </div>
             <div id="import-preview"></div>
           </div>
@@ -738,10 +738,10 @@ function goToNext() {
   loadNextQuestion();
 }
 
-let importFileData = null;
+let importFileList = [];
 
 function showImportModal() {
-  importFileData = null;
+  importFileList = [];
   document.getElementById('import-file').value = '';
   document.getElementById('import-preview').innerHTML = '';
   document.getElementById('import-btn').disabled = true;
@@ -749,36 +749,78 @@ function showImportModal() {
 }
 
 function previewImport(e) {
-  const file = e.target.files[0];
-  if (!file) return;
-  const reader = new FileReader();
-  reader.onload = (ev) => {
-    try {
-      importFileData = JSON.parse(ev.target.result);
-      document.getElementById('import-preview').innerHTML = `
-        <div class="alert alert-info">
-          <strong>${escHtml(importFileData.title)}</strong><br>
-          ${importFileData.questions ? importFileData.questions.length : 0} 道题目
-        </div>
-      `;
-      document.getElementById('import-btn').disabled = false;
-    } catch {
-      document.getElementById('import-preview').innerHTML = '<div class="alert alert-danger">无效的 JSON 文件</div>';
-    }
-  };
-  reader.readAsText(file);
+  const files = e.target.files;
+  if (!files || files.length === 0) return;
+
+  importFileList = [];
+  let pending = files.length;
+  let hasError = false;
+  const container = document.getElementById('import-preview');
+  container.innerHTML = '';
+
+  for (const file of files) {
+    const reader = new FileReader();
+    reader._fileName = file.name;
+    reader.onload = (ev) => {
+      try {
+        const data = JSON.parse(ev.target.result);
+        if (!data.title || !data.questions) {
+          throw new Error('缺少 title 或 questions 字段');
+        }
+        importFileList.push(data);
+        container.innerHTML += `
+          <div class="alert alert-info mb-2">
+            <strong>${escHtml(data.title)}</strong>
+            <span class="text-muted ms-2">${data.questions.length} 题</span>
+            <small class="text-muted ms-2">(${escHtml(ev.target._fileName)})</small>
+          </div>
+        `;
+      } catch (err) {
+        hasError = true;
+        container.innerHTML += `
+          <div class="alert alert-danger mb-2 py-2">
+            ${escHtml(ev.target._fileName)}: 无效的 JSON 文件 — ${escHtml(err.message)}
+          </div>
+        `;
+      } finally {
+        pending--;
+        if (pending === 0) {
+          document.getElementById('import-btn').disabled = hasError || importFileList.length === 0;
+        }
+      }
+    };
+    reader.readAsText(file);
+  }
 }
 
 async function doImport() {
-  if (!importFileData) return;
+  if (importFileList.length === 0) return;
   const btn = document.getElementById('import-btn');
   btn.disabled = true; btn.innerHTML = '导入中...';
+  const preview = document.getElementById('import-preview');
+
   try {
-    await api.importBank(importFileData);
-    bootstrap.Modal.getInstance(document.getElementById('importModal')).hide();
-    router.navigate('/banks');
+    const res = await api.importBanksMultiple(importFileList);
+    preview.innerHTML = '';
+    let allOk = true;
+    for (const r of res.results) {
+      if (r.success) {
+        preview.innerHTML += `<div class="alert alert-success mb-2 py-2">${escHtml(r.title)} ✓ (${r.question_count} 题)</div>`;
+      } else {
+        allOk = false;
+        preview.innerHTML += `<div class="alert alert-danger mb-2 py-2">${escHtml(r.title)} ✗ — ${escHtml(r.error)}</div>`;
+      }
+    }
+    if (allOk) {
+      setTimeout(() => {
+        bootstrap.Modal.getInstance(document.getElementById('importModal')).hide();
+        router.navigate('/banks');
+      }, 800);
+    } else {
+      btn.disabled = false; btn.innerHTML = '确认导入（仅导入成功的）';
+    }
   } catch (err) {
-    document.getElementById('import-preview').innerHTML = `<div class="alert alert-danger">导入失败: ${err.message}</div>`;
+    preview.innerHTML = `<div class="alert alert-danger">导入失败: ${err.message}</div>`;
     btn.disabled = false; btn.innerHTML = '确认导入';
   }
 }
