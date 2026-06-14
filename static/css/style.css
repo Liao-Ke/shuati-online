@@ -463,6 +463,19 @@ h1, h2, h3, h4, h5, h6 {
   }
 }
 
+@media (max-width: 768px) {
+  .exam-layout-preview {
+    flex-direction: column;
+  }
+  .exam-layout-preview .exam-sidebar {
+    order: -1;
+    margin-bottom: 0.75rem;
+  }
+  .exam-layout-preview .exam-sidebar-header {
+    display: none;
+  }
+}
+
 .review-option {
   border: 1px solid var(--border);
   border-radius: 8px;
@@ -633,12 +646,32 @@ h1, h2, h3, h4, h5, h6 {
 .preview-card-analysis {
   margin-top: 0.75rem;
   padding: 0.6rem 0.75rem;
-  background: #FFF7ED;
-  border: 1px solid #FED7AA;
   border-radius: 6px;
   font-size: 0.9rem;
-  color: #9A3412;
   line-height: 1.5;
+}
+
+.preview-card-analysis-correct {
+  background: #F0FDF4;
+  border: 1px solid #BBF7D0;
+  color: #166534;
+}
+
+.preview-card-analysis-wrong {
+  background: #FEF2F2;
+  border: 1px solid #FECACA;
+  color: #991B1B;
+}
+
+.analysis-box {
+  margin-top: 0.75rem;
+  padding: 0.6rem 0.75rem;
+  border-radius: 6px;
+  font-size: 0.9rem;
+  line-height: 1.5;
+  background: #FFF7ED;
+  border: 1px solid #FED7AA;
+  color: #9A3412;
 }
 
 .exam-pause-text {

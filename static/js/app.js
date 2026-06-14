@@ -46,6 +46,7 @@ let examProgress = null;
 let examPaused = false;
 let examPauseRemaining = 0;
 let examFullPreview = false;
+let examScrollTimer = null;
 
 async function checkAuth() {
   if (!api.token) return false;
@@ -297,7 +298,10 @@ router.add('/banks/:id', async ({ id }) => {
 });
 
 router.add('/exam/setup', async () => {
+  window.removeEventListener('scroll', trackPreviewScroll);
   sessionStorage.removeItem('activeExamId');
+  sessionStorage.removeItem('examCurrentIndex');
+  sessionStorage.removeItem('examMode');
   showNav();
   render('<div class="text-center py-5"><div class="spinner-border"></div></div>');
   try {
@@ -426,13 +430,35 @@ router.add('/exam', async () => {
       </div>
     </div>
   `);
-  examCurrentIndex = 0;
   examPaused = false;
   examPauseRemaining = 0;
   document.removeEventListener('keydown', examKeyHandler);
+  const savedIdx = sessionStorage.getItem('examCurrentIndex');
+  if (savedIdx) examCurrentIndex = parseInt(savedIdx);
+  const savedMode = sessionStorage.getItem('examMode');
+  if (savedMode) examFullPreview = savedMode === 'preview';
   examProgress = await api.getExamProgress(examId);
   renderQuestionGrid();
-  loadQuestionByIndex(0);
+  if (examFullPreview) {
+    document.getElementById('mode-toggle-btn').textContent = '📖 单题模式';
+    document.getElementById('prev-btn').style.display = 'none';
+    document.getElementById('next-btn').style.display = 'none';
+    document.getElementById('exam-nav-hint').style.display = 'none';
+    document.getElementById('exam-timer').style.display = 'none';
+    document.querySelector('.exam-progress').style.display = 'none';
+    document.getElementById('exam-progress-text').textContent = '整卷模式';
+    document.querySelector('.exam-layout')?.classList.add('exam-layout-preview');
+    await renderFullPreview();
+    window.addEventListener('scroll', trackPreviewScroll, { passive: true });
+    const scrollIdx = Math.min(examCurrentIndex, examTotalCount - 1);
+    const scrollEl = document.querySelector(`.preview-card[data-index="${scrollIdx}"]`);
+    if (scrollEl) {
+      const top = scrollEl.getBoundingClientRect().top + window.scrollY - 80;
+      setTimeout(() => window.scrollTo({ top, behavior: 'smooth' }), 50);
+    }
+  } else {
+    loadQuestionByIndex(examCurrentIndex);
+  }
   document.addEventListener('keydown', examKeyHandler);
 });
 
@@ -444,7 +470,10 @@ function examKeyHandler(e) {
 }
 
 router.add('/result/:id', async ({ id }) => {
+  window.removeEventListener('scroll', trackPreviewScroll);
   sessionStorage.removeItem('activeExamId');
+  sessionStorage.removeItem('examCurrentIndex');
+  sessionStorage.removeItem('examMode');
   showNav();
   render('<div class="text-center py-5"><div class="spinner-border"></div></div>');
   try {
@@ -488,8 +517,8 @@ router.add('/result/:id', async ({ id }) => {
           </div>
           <p class="mb-1 mt-1">${escHtml(a.content)}</p>
           ${renderOptions(a.options, a.user_answer, a.correct_answer)}
-          <p class="mb-0 small"><span class="text-danger">你的答案: ${escHtml(userAns)}</span></p>
-          ${!a.is_correct ? `<p class="mb-0 small text-success">正确答案: ${escHtml(correctAns)}</p>` : ''}
+          <p class="mb-0 small"><span class="${a.is_correct ? 'text-success' : 'text-danger'}">你的答案: ${escHtml(userAns)}</span></p>
+          <p class="mb-0 small text-success">正确答案: ${escHtml(correctAns)}</p>
           ${a.analysis ? `<p class="mb-0 small text-muted mt-1">解析: ${escHtml(a.analysis)}</p>` : ''}
         </div>
       `;
@@ -566,8 +595,8 @@ router.add('/history/:id', async ({ id }) => {
           </div>
           <p class="mb-1 mt-1">${escHtml(a.content)}</p>
           ${renderOptions(a.options, a.user_answer, a.correct_answer)}
-          <p class="mb-0 small"><span class="text-danger">你的答案: ${escHtml(userAns)}</span></p>
-          ${!a.is_correct ? `<p class="mb-0 small text-success">正确答案: ${escHtml(correctAns)}</p>` : ''}
+          <p class="mb-0 small"><span class="${a.is_correct ? 'text-success' : 'text-danger'}">你的答案: ${escHtml(userAns)}</span></p>
+          <p class="mb-0 small text-success">正确答案: ${escHtml(correctAns)}</p>
           ${a.analysis ? `<p class="mb-0 small text-muted mt-1">解析: ${escHtml(a.analysis)}</p>` : ''}
         </div>
       `;
@@ -939,12 +968,24 @@ function renderQuestionGrid() {
 
 function goToQuestion(index) {
   if (index === examCurrentIndex) return;
-  loadQuestionByIndex(index);
+  sessionStorage.setItem('examCurrentIndex', index);
+  if (examFullPreview) {
+    examCurrentIndex = index;
+    renderQuestionGrid();
+    const el = document.querySelector(`.preview-card[data-index="${index}"]`);
+    if (el) {
+      const top = el.getBoundingClientRect().top + window.scrollY - 80;
+      window.scrollTo({ top, behavior: 'smooth' });
+    }
+  } else {
+    loadQuestionByIndex(index);
+  }
 }
 
 async function loadQuestionByIndex(index) {
   if (examTimerInterval) clearInterval(examTimerInterval);
   if (!examId) return;
+  sessionStorage.setItem('examCurrentIndex', index);
   try {
     const data = await api.getCurrentQuestion(examId, index);
     if (!data.question) {
@@ -973,9 +1014,9 @@ async function loadQuestionByIndex(index) {
           <h4 class="mb-4">${escHtml(q.content)}</h4>
           <div class="feedback ${feedbackClass}">
             <h3>${icon} ${data.is_correct ? '回答正确！' : '回答错误'}</h3>
-            <p class="mb-1">你的答案: <strong>${escHtml(data.user_answer || '(未作答)')}</strong></p>
+            <p class="mb-1">你的答案: <strong class="${data.is_correct ? 'text-success' : 'text-danger'}">${escHtml(data.user_answer || '(未作答)')}</strong></p>
             <p class="mb-1">正确答案: <strong>${escHtml(data.correct_answer)}</strong></p>
-            ${q.analysis ? `<div class="mt-2 pt-2 border-top border-light">📖 ${escHtml(q.analysis)}</div>` : ''}
+            ${q.analysis ? `<div class="analysis-box">📖 ${escHtml(q.analysis)}</div>` : ''}
           </div>
         </div>
       `;
@@ -1073,7 +1114,10 @@ async function finishExam() {
   clearInterval(examTimerInterval);
   try {
     await api.finishExam(examId);
+    window.removeEventListener('scroll', trackPreviewScroll);
     sessionStorage.removeItem('activeExamId');
+    sessionStorage.removeItem('examCurrentIndex');
+    sessionStorage.removeItem('examMode');
     document.removeEventListener('keydown', examKeyHandler);
     router.navigate(`/result/${examId}`);
   } catch (err) {
@@ -1086,11 +1130,31 @@ function parseTime(str) {
   return parseInt(parts[0]) * 60 + parseInt(parts[1]);
 }
 
+function trackPreviewScroll() {
+  if (examScrollTimer) clearTimeout(examScrollTimer);
+  examScrollTimer = setTimeout(() => {
+    const cards = document.querySelectorAll('.preview-card');
+    if (!cards.length) return;
+    let nearest = 0, minDist = Infinity;
+    cards.forEach(card => {
+      const dist = Math.abs(card.getBoundingClientRect().top - 80);
+      if (dist < minDist) { minDist = dist; nearest = parseInt(card.dataset.index); }
+    });
+    if (nearest !== examCurrentIndex) {
+      examCurrentIndex = nearest;
+      sessionStorage.setItem('examCurrentIndex', nearest);
+      renderQuestionGrid();
+    }
+  }, 150);
+}
+
 async function toggleExamMode() {
   examFullPreview = !examFullPreview;
+  sessionStorage.setItem('examMode', examFullPreview ? 'preview' : 'single');
   const btn = document.getElementById('mode-toggle-btn');
   if (examFullPreview) {
     btn.textContent = '📖 单题模式';
+    document.querySelector('.exam-layout')?.classList.add('exam-layout-preview');
     document.getElementById('prev-btn').style.display = 'none';
     document.getElementById('next-btn').style.display = 'none';
     document.getElementById('exam-nav-hint').style.display = 'none';
@@ -1098,8 +1162,16 @@ async function toggleExamMode() {
     document.querySelector('.exam-progress').style.display = 'none';
     document.getElementById('exam-progress-text').textContent = '整卷模式';
     await renderFullPreview();
+    const scrollEl = document.querySelector(`.preview-card[data-index="${examCurrentIndex}"]`);
+    if (scrollEl) {
+      const top = scrollEl.getBoundingClientRect().top + window.scrollY - 80;
+      setTimeout(() => window.scrollTo({ top, behavior: 'smooth' }), 50);
+    }
+    window.addEventListener('scroll', trackPreviewScroll, { passive: true });
   } else {
     btn.textContent = '📋 整卷模式';
+    window.removeEventListener('scroll', trackPreviewScroll);
+    document.querySelector('.exam-layout')?.classList.remove('exam-layout-preview');
     document.getElementById('prev-btn').style.display = '';
     document.getElementById('next-btn').style.display = '';
     document.getElementById('exam-nav-hint').style.display = '';
@@ -1140,8 +1212,8 @@ async function renderFullPreview() {
           ['对', '错'].forEach(v => {
             const letter = labels[v];
             let cls = 'preview-option';
-            if (letter === q.answer) cls += ' preview-option-correct';
-            else if (letter === q.user_answer) cls += ' preview-option-wrong';
+            if (v === q.answer) cls += ' preview-option-correct';
+            else if (v === q.user_answer) cls += ' preview-option-wrong';
             optionsHtml += `<div class="${cls}">${letter}. ${v}</div>`;
           });
         } else {
@@ -1165,7 +1237,7 @@ async function renderFullPreview() {
       if (q.type === 'fill' && q.is_answered) {
         const userAns = Array.isArray(q.user_answer) ? q.user_answer.join(', ') : q.user_answer;
         const correctAns = Array.isArray(q.answer) ? q.answer.join(', ') : q.answer;
-        optionsHtml = `<div class="text-muted small mt-1">你的答案: <span class="text-danger">${escHtml(userAns)}</span> | 正确答案: <span class="text-success">${escHtml(correctAns)}</span></div>`;
+        optionsHtml = `<div class="text-muted small mt-1">你的答案: <span class="${q.is_correct ? 'text-success' : 'text-danger'}">${escHtml(userAns)}</span> | 正确答案: <span class="text-success">${escHtml(correctAns)}</span></div>`;
       }
       html += `
         <div class="preview-card ${statusCls}" data-index="${q.index}">
@@ -1177,7 +1249,7 @@ async function renderFullPreview() {
           </div>
           <div class="preview-card-body">${escHtml(q.content)}</div>
           ${optionsHtml ? `<div class="preview-card-options">${optionsHtml}</div>` : ''}
-          ${q.is_answered && q.analysis ? `<div class="preview-card-analysis">📖 ${escHtml(q.analysis)}</div>` : ''}
+          ${q.is_answered && q.analysis ? `<div class="preview-card-analysis ${q.is_correct ? 'preview-card-analysis-correct' : 'preview-card-analysis-wrong'}">📖 ${escHtml(q.analysis)}</div>` : ''}
         </div>
       `;
     });
@@ -1193,6 +1265,8 @@ async function submitInlineAnswer(examId, questionId, index, answer) {
   const timeSpent = 1;
   try {
     const res = await api.submitAnswer(examId, questionId, answer, timeSpent);
+    examCurrentIndex = index;
+    sessionStorage.setItem('examCurrentIndex', index);
     examProgress = await api.getExamProgress(examId);
     renderQuestionGrid();
     updatePreviewCard(index, questionId, res.is_correct, res.correct_answer, answer, res.analysis);
@@ -1241,14 +1315,14 @@ function updatePreviewCard(index, questionId, isCorrect, correctAnswer, userAnsw
     newOptionsHtml = ['对', '错'].map(v => {
       const letter = labels[v];
       let cls = 'preview-option';
-      if (letter === ca) cls += ' preview-option-correct';
-      else if (letter === ua) cls += ' preview-option-wrong';
+      if (v === ca) cls += ' preview-option-correct';
+      else if (v === ua) cls += ' preview-option-wrong';
       return `<div class="${cls}">${letter}. ${v}</div>`;
     }).join('');
   } else {
     const userAns = Array.isArray(userAnswer) ? userAnswer.join(', ') : userAnswer || '';
     const correctAns = Array.isArray(correctAnswer) ? correctAnswer.join(', ') : correctAnswer || '';
-    newOptionsHtml = `<div class="text-muted small mt-1">你的答案: <span class="text-danger">${escHtml(userAns)}</span> | 正确答案: <span class="text-success">${escHtml(correctAns)}</span></div>`;
+    newOptionsHtml = `<div class="text-muted small mt-1">你的答案: <span class="${isCorrect ? 'text-success' : 'text-danger'}">${escHtml(userAns)}</span> | 正确答案: <span class="text-success">${escHtml(correctAns)}</span></div>`;
   }
 
   optionsDiv.innerHTML = newOptionsHtml;
@@ -1257,7 +1331,7 @@ function updatePreviewCard(index, questionId, isCorrect, correctAnswer, userAnsw
   if (existingAnalysis) existingAnalysis.remove();
   if (analysis) {
     const analysisDiv = document.createElement('div');
-    analysisDiv.className = 'preview-card-analysis';
+    analysisDiv.className = `preview-card-analysis ${isCorrect ? 'preview-card-analysis-correct' : 'preview-card-analysis-wrong'}`;
     analysisDiv.textContent = '📖 ' + analysis;
     card.appendChild(analysisDiv);
   }
@@ -1527,6 +1601,10 @@ async function init() {
   if (savedExamId) examId = parseInt(savedExamId);
   const savedFilter = sessionStorage.getItem('reviewFilter');
   if (savedFilter) reviewFilter = JSON.parse(savedFilter);
+  const savedMode = sessionStorage.getItem('examMode');
+  if (savedMode) examFullPreview = savedMode === 'preview';
+  const savedIdx = sessionStorage.getItem('examCurrentIndex');
+  if (savedIdx) examCurrentIndex = parseInt(savedIdx);
   const authed = await checkAuth();
   if (!authed && !location.hash.match(/^\#\/(login|register)$/)) {
     router.navigate('/login');
