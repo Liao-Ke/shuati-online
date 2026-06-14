@@ -62,4 +62,8 @@ const api = {
   getWrongAnswers() { return this.get('/wrong-answers'); },
 
   getDashboard() { return this.get('/dashboard'); },
+
+  getReviewQuestions(data) { return this.post('/review/questions', data); },
+  markReview(questionId, status) { return this.post('/review/mark', { question_id: questionId, status }); },
+  getReviewStats() { return this.get('/review/stats'); },
 };

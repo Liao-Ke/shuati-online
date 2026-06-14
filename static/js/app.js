@@ -520,6 +520,207 @@ router.add('/wrong-answers', async () => {
   }
 });
 
+let reviewQuestions = [];
+let reviewFilter = null;
+
+router.add('/review/setup', async () => {
+  showNav();
+  render('<div class="text-center py-5"><div class="spinner-border"></div></div>');
+  try {
+    const banks = await api.getBanks();
+    if (banks.length === 0) {
+      render('<div class="empty-state"><p>还没有题库</p><p class="text-muted">请先导入题库</p><a href="#/banks" class="btn btn-primary">去导入</a></div>');
+      return;
+    }
+    render(`
+      <div class="page-header"><h2>背题设置</h2></div>
+      <div class="card mb-4"><div class="card-body">
+        <h5>选择题库</h5>
+        <div id="review-bank-select" class="row g-2"></div>
+        <p class="mt-2 text-muted" id="review-selected-count">已选 0 个题库</p>
+      </div></div>
+      <div class="card mb-4"><div class="card-body">
+        <h5>题型筛选</h5>
+        <div class="d-flex gap-3 mt-2">
+          <label><input type="checkbox" class="form-check-input me-1 review-type-filter" value="choice" checked> 选择题</label>
+          <label><input type="checkbox" class="form-check-input me-1 review-type-filter" value="fill" checked> 填空题</label>
+          <label><input type="checkbox" class="form-check-input me-1 review-type-filter" value="judge" checked> 判断题</label>
+        </div>
+      </div></div>
+      <div class="card mb-4"><div class="card-body">
+        <h5>章节筛选 <small class="text-muted">（可选）</small></h5>
+        <select class="form-select" id="review-chapter-select">
+          <option value="">全部章节</option>
+        </select>
+      </div></div>
+      <div class="card mb-4"><div class="card-body">
+        <div class="form-check">
+          <input type="checkbox" class="form-check-input" id="review-show-reviewing">
+          <label class="form-check-label">只看待复习的题目（已标记"记住"的隐藏）</label>
+        </div>
+      </div></div>
+      <button class="btn btn-primary btn-lg w-100" onclick="startReview()">开始背题</button>
+    `);
+    const bankSelect = document.getElementById('review-bank-select');
+    banks.forEach(b => {
+      bankSelect.innerHTML += `
+        <div class="col-md-4 col-6">
+          <div class="bank-check-card" onclick="toggleReviewBankSelect(this)">
+            <div class="form-check">
+              <input type="checkbox" class="form-check-input review-bank-checkbox" value="${b.id}">
+              <label class="form-check-label">${escHtml(b.title)} <span class="text-muted">(${b.question_count} 题)</span></label>
+            </div>
+          </div>
+        </div>
+      `;
+    });
+  } catch {
+    render('<div class="alert alert-danger">加载失败</div>');
+  }
+});
+
+function toggleReviewBankSelect(el) {
+  const cb = el.querySelector('.review-bank-checkbox');
+  cb.checked = !cb.checked;
+  el.classList.toggle('selected');
+  const count = document.querySelectorAll('.review-bank-checkbox:checked').length;
+  document.getElementById('review-selected-count').textContent = `已选 ${count} 个题库`;
+}
+
+async function startReview() {
+  const selectedBanks = [...document.querySelectorAll('.review-bank-checkbox:checked')].map(cb => parseInt(cb.value));
+  if (selectedBanks.length === 0) { alert('请至少选择一个题库'); return; }
+  const types = [...document.querySelectorAll('.review-type-filter:checked')].map(cb => cb.value);
+  const chapter = document.getElementById('review-chapter-select').value || null;
+  const showReviewingOnly = document.getElementById('review-show-reviewing').checked;
+  reviewFilter = { bank_ids: selectedBanks, types, chapter, show_reviewing_only: showReviewingOnly };
+  router.navigate('/review');
+}
+
+router.add('/review', async () => {
+  showNav();
+  if (!reviewFilter) { router.navigate('/review/setup'); return; }
+  render('<div class="text-center py-5"><div class="spinner-border"></div></div>');
+  try {
+    reviewQuestions = await api.getReviewQuestions(reviewFilter);
+    renderReviewPage();
+  } catch {
+    render('<div class="alert alert-danger">加载失败</div>');
+  }
+});
+
+function renderReviewPage() {
+  if (reviewQuestions.length === 0) {
+    render(`
+      <div class="page-header">
+        <h2><a href="#/review/setup" class="text-decoration-none me-2">&larr;</a> 背题模式</h2>
+      </div>
+      <div class="empty-state"><p>没有符合条件的题目</p></div>
+    `);
+    return;
+  }
+  const knownCount = reviewQuestions.filter(q => q.review_status === 'known').length;
+  const reviewingCount = reviewQuestions.filter(q => q.review_status === 'reviewing' || !q.review_status).length;
+  const totalStr = `共 ${reviewQuestions.length} 题 · 已掌握 ${knownCount} · 待复习 ${reviewingCount}`;
+  let html = `
+    <div class="page-header">
+      <h2><a href="#/review/setup" class="text-decoration-none me-2">&larr;</a> 背题模式</h2>
+      <span class="text-muted">${totalStr}</span>
+    </div>
+    <div id="review-stats-bar" class="mb-3">
+      <div class="d-flex gap-3 align-items-center flex-wrap">
+        <span><strong>${reviewQuestions.length}</strong> 题</span>
+        <span class="text-success">已掌握 <strong>${knownCount}</strong></span>
+        <span class="text-warning">待复习 <strong>${reviewingCount}</strong></span>
+      </div>
+    </div>
+  `;
+  reviewQuestions.forEach((q, i) => {
+    const typeMap = { choice: '选择', fill: '填空', judge: '判断' };
+    const isKnown = q.review_status === 'known';
+    const statusBadge = isKnown
+      ? '<span class="badge bg-success">已掌握</span>'
+      : '<span class="badge bg-warning text-dark">待复习</span>';
+    let optionsHtml = '';
+    if (q.type === 'choice' && q.options) {
+      try {
+        const opts = JSON.parse(q.options);
+        opts.forEach(opt => {
+          optionsHtml += `<div class="review-option">${escHtml(opt)}</div>`;
+        });
+      } catch { /* ignore */ }
+    }
+    const correctDisplay = q.answer || '';
+    const analysisDisplay = q.analysis ? `<div class="review-analysis mt-2">解析：${escHtml(q.analysis)}</div>` : '';
+    html += `
+      <div class="review-question-card card mb-3" data-id="${q.id}">
+        <div class="card-body">
+          <div class="d-flex justify-content-between align-items-start">
+            <div class="flex-grow-1">
+              <div class="mb-2">
+                <span class="badge bg-primary me-1">${typeMap[q.type] || q.type}</span>
+                ${q.chapter ? `<span class="badge bg-secondary me-1">${escHtml(q.chapter)}</span>` : ''}
+                ${statusBadge}
+              </div>
+              <h5 class="mb-3">${escHtml(q.content)}</h5>
+              ${optionsHtml}
+              <div class="review-answer mt-3 p-3 bg-light rounded">
+                <strong>答案：</strong>${escHtml(correctDisplay)}
+                ${analysisDisplay}
+              </div>
+            </div>
+            <div class="ms-3 text-nowrap review-toggle-group">
+              <button class="btn btn-sm ${isKnown ? 'btn-success' : 'btn-outline-success'}" onclick="setReviewStatus(${q.id}, 'known', this)">记住了</button>
+              <button class="btn btn-sm ${!isKnown ? 'btn-warning' : 'btn-outline-warning'}" onclick="setReviewStatus(${q.id}, 'reviewing', this)">待复习</button>
+            </div>
+          </div>
+        </div>
+      </div>
+    `;
+  });
+  render(html);
+}
+
+async function setReviewStatus(questionId, status, btn) {
+  try {
+    const stats = await api.markReview(questionId, status);
+    const q = reviewQuestions.find(x => x.id === questionId);
+    if (q) q.review_status = status;
+    const knownCount = reviewQuestions.filter(x => x.review_status === 'known').length;
+    const reviewingCount = reviewQuestions.filter(x => x.review_status === 'reviewing' || !x.review_status).length;
+    const statsBar = document.getElementById('review-stats-bar');
+    if (statsBar) {
+      statsBar.innerHTML = `
+        <div class="d-flex gap-3 align-items-center flex-wrap">
+          <span><strong>${reviewQuestions.length}</strong> 题</span>
+          <span class="text-success">已掌握 <strong>${knownCount}</strong></span>
+          <span class="text-warning">待复习 <strong>${reviewingCount}</strong></span>
+        </div>
+      `;
+    }
+    const card = document.querySelector(`.review-question-card[data-id="${questionId}"]`);
+    if (card) {
+      const badge = card.querySelector('.badge.bg-success, .badge.bg-warning');
+      if (badge) {
+        if (status === 'known') {
+          badge.className = 'badge bg-success';
+          badge.textContent = '已掌握';
+        } else {
+          badge.className = 'badge bg-warning text-dark';
+          badge.textContent = '待复习';
+        }
+      }
+      const btns = card.querySelectorAll('.review-toggle-group button');
+      if (btns.length === 2) {
+        btns[0].className = status === 'known' ? 'btn btn-sm btn-success' : 'btn btn-sm btn-outline-success';
+        btns[1].className = status === 'reviewing' ? 'btn btn-sm btn-warning' : 'btn btn-sm btn-outline-warning';
+      }
+    }
+  } catch (err) {
+    alert('标记失败: ' + err.message);
+  }
+}
+
 function render(html) {
   document.getElementById('content').innerHTML = html;
 }

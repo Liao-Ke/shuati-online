@@ -143,3 +143,36 @@ class DashboardData(BaseModel):
     total_exams: int = 0
     average_accuracy: float = 0
     recent_exams: List[HistoryItem] = []
+
+
+class ReviewFilter(BaseModel):
+    bank_ids: List[int]
+    types: Optional[List[str]] = None
+    chapter: Optional[str] = None
+    show_reviewing_only: bool = False
+
+
+class ReviewQuestionOut(BaseModel):
+    id: int
+    type: str
+    chapter: Optional[str] = None
+    content: str
+    options: Optional[str] = None
+    answer: str
+    analysis: Optional[str] = None
+    sort_order: int
+    review_status: Optional[str] = None
+
+    class Config:
+        from_attributes = True
+
+
+class MarkBody(BaseModel):
+    question_id: int
+    status: str
+
+
+class ReviewStats(BaseModel):
+    known_count: int = 0
+    reviewing_count: int = 0
+    total_reviewed: int = 0

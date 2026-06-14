@@ -1,6 +1,6 @@
 import datetime
 from sqlalchemy import (
-    Column, Integer, String, Text, DateTime, Boolean, ForeignKey,
+    Column, Integer, String, Text, DateTime, Boolean, ForeignKey, UniqueConstraint,
 )
 from sqlalchemy.orm import relationship
 from database import Base
@@ -81,3 +81,21 @@ class AnswerRecord(Base):
 
     exam = relationship("ExamRecord", back_populates="answer_records")
     question = relationship("Question", back_populates="answer_records")
+
+
+class ReviewRecord(Base):
+    __tablename__ = "review_records"
+
+    id = Column(Integer, primary_key=True, index=True)
+    user_id = Column(Integer, ForeignKey("users.id"), nullable=False)
+    question_id = Column(Integer, ForeignKey("questions.id"), nullable=False)
+    status = Column(String(20), default="reviewing")
+    reviewed_at = Column(DateTime, default=datetime.datetime.utcnow)
+    review_count = Column(Integer, default=1)
+
+    user = relationship("User")
+    question = relationship("Question")
+
+    __table_args__ = (
+        UniqueConstraint("user_id", "question_id", name="uq_user_question_review"),
+    )
