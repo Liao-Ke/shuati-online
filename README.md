@@ -15,7 +15,6 @@
 - **结果统计** — 答题结束展示正确率、用时、逐题回顾
 - **错题本** — 自动收集答错题目
 - **练习历史** — 查看过往练习记录
-- **暂停/继续** — 答题过程中可随时暂停
 - **自定义题数** — 选择题库后可选题目数量（全部或随机抽题）
 - **Docker 部署** — 提供 Dockerfile 和 docker-compose.yml
 
@@ -70,18 +69,23 @@ docker compose up -d
 |------|------|------|
 | `/api/auth/register` | POST | 注册 |
 | `/api/auth/login` | POST | 登录 |
+| `/api/auth/me` | GET | 当前用户信息 |
 | `/api/exam/start` | POST | 开始答题 |
 | `/api/exam/{id}/current` | GET | 获取当前题目 |
-| `/api/exam/{id}/preview` | GET | 获取整卷预览 |
+| `/api/exam/{id}/preview` | GET | 整卷预览 |
 | `/api/exam/{id}/answer` | POST | 提交答案 |
 | `/api/exam/{id}/progress` | GET | 答题进度 |
 | `/api/exam/{id}/finish` | POST | 结束答题 |
 | `/api/exam/{id}/result` | GET | 答题结果 |
-| `/api/history` | GET | 练习历史 |
+| `/api/history` | GET | 练习历史（分页） |
+| `/api/history/{id}` | GET | 历史详情 |
+| `/api/question-banks` | GET | 题库列表 |
+| `/api/question-banks/{id}` | GET | 题库详情 |
+| `/api/question-banks/import` | POST | 导入题库 |
+| `/api/question-banks/import-multiple` | POST | 批量导入 |
 | `/api/review/questions` | POST | 背题列表 |
 | `/api/review/mark` | POST | 标记掌握状态 |
-| `/api/question-banks` | GET | 题库列表 |
-| `/api/question-banks/import` | POST | 导入题库 |
+| `/api/review/stats` | GET | 背题统计 |
 | `/api/wrong-answers` | GET | 错题本 |
 | `/api/dashboard` | GET | 首页统计 |
 

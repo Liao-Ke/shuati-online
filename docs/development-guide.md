@@ -1,0 +1,281 @@
+# 开发指南
+
+## 环境搭建
+
+### 前置要求
+
+```bash
+# Python 3.11+
+python --version
+
+# pip
+pip --version
+```
+
+### 本地开发环境
+
+```bash
+# 克隆项目
+git clone <repo-url>
+cd 刷题在线
+
+# 创建虚拟环境（可选但推荐）
+python -m venv venv
+source venv/bin/activate
+
+# 安装依赖
+pip install -r requirements.txt
+
+# 启动开发服务器
+uvicorn main:app --reload --host 0.0.0.0 --port 8000
+```
+
+### Docker 开发环境
+
+```bash
+docker compose build --build-arg PIP_INDEX_URL=https://mirrors.tuna.tsinghua.edu.cn/pypi/web/simple
+docker compose up -d
+docker compose logs -f
+```
+
+---
+
+## 项目结构速览
+
+```
+刷题在线/
+├── main.py                 # 入口：FastAPI 初始化 + 路由挂载 + 静态文件
+├── database.py             # 数据库引擎 + Session + get_db
+├── models.py               # ORM 模型（6 张表）
+├── schemas.py              # Pydantic 请求/响应模型
+├── auth.py                 # JWT + bcrypt + get_current_user
+├── requirements.txt        # 所有 Python 依赖
+├── test_integration.py     # 集成测试（单文件，TestClient）
+│
+├── routers/                # 按功能拆分的路由模块
+│   ├── auth.py             # 注册/登录/me
+│   ├── banks.py            # 题库 CRUD + 导入
+│   ├── exam.py             # 答题全流程
+│   ├── history.py          # 练习历史
+│   ├── dashboard.py        # 仪表盘统计
+│   ├── wrong_answers.py    # 错题本
+│   └── review.py           # 背题模式
+│
+├── static/                 # 前端 SPA
+│   ├── index.html          # 入口，导航栏
+│   ├── css/style.css       # 自定义样式
+│   └── js/
+│       ├── api.js          # API 调用封装
+│       └── app.js          # 路由 + 渲染 + 事件
+│
+├── docs/                   # 文档
+│   ├── PRD.md
+│   ├── architecture.md
+│   ├── api-reference.md
+│   ├── deployment.md
+│   ├── frontend-style-guide.md
+│   ├── page-designs.md
+│   └── development-guide.md (本文件)
+│
+└── features/               # 功能实现说明
+    ├── exam-platform-v1.md
+    ├── exam-navigation.md
+    ├── question-count-selector.md
+    ├── review-mode.md
+    └── github-prepare.md
+```
+
+---
+
+## 常规开发流程
+
+### 新增一个路由模块
+
+以下步骤以新增"收藏夹"功能为例（`routers/favorites.py`）：
+
+**1. 创建路由文件**
+
+```python
+# routers/favorites.py
+from fastapi import APIRouter, Depends
+from sqlalchemy.orm import Session
+from database import get_db
+from models import User
+from auth import get_current_user
+
+router = APIRouter(prefix="/api/favorites", tags=["收藏"])
+
+
+@router.get("")
+def list_favorites(user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+    return {"favorites": []}
+```
+
+**2. 注册到 main.py**
+
+```python
+from routers import favorites
+app.include_router(favorites.router)
+```
+
+**3. 新增模型（如需新表）**
+
+在 `models.py` 中添加 ORM 类，重启后自动建表（前提是 `exam.db` 已删除或未冲突）。
+
+**4. 新增 Schemas（如需新请求/响应）**
+
+在 `schemas.py` 中添加 Pydantic 模型。
+
+**5. 前端对接**
+
+- `static/js/api.js` — 添加 API 调用函数
+- `static/js/app.js` — 添加路由和页面渲染函数
+- `static/index.html` — 如需导航入口则添加
+
+**6. 更新测试**
+
+在 `test_integration.py` 末尾追加测试。
+
+### 修改数据库模型
+
+1. 修改 `models.py` 中的 ORM 类
+2. 删除 `exam.db`（已有的数据会丢失）
+3. 重启服务，ORM 自动重建表
+
+如需保留数据：手动备份旧 db，写迁移脚本，或等引入 Alembic。
+
+### 前端新增页面
+
+1. 在 `app.js` 的 `routes` 对象中添加 `"pageName": renderPageFunction` 映射
+2. 实现 `renderXxxPage()` 函数
+3. 如果需要新的 API 调用，在 `api.js` 中添加方法
+4. 如果导航栏需要新入口，在 `index.html` 中添加 `<li class="nav-item">` 链接
+
+### 完成功能后
+
+1. 验证测试通过：`pytest test_integration.py -v`
+2. 在 `features/` 中新增 Markdown 文档，说明目标、修改范围、核心实现、影响范围、验证方式
+
+---
+
+## 测试
+
+### 运行测试
+
+```bash
+pytest test_integration.py -v
+```
+
+### 测试说明
+
+- 单文件集成测试，覆盖全流程：注册 → 导入 → 答题 → 结果 → 错题 → 历史 → 仪表盘 → 删除
+- 使用 `TestClient`（FastAPI 内置），**不需要**额外安装 `httpx`
+- 每次运行使用随机 UUID 用户名，避免重复注册冲突
+- 测试顺序依赖（前一个测试的结果被后一个复用），新增测试追加在末尾
+
+### 测试编写规范
+
+```python
+# 每个测试步骤打印可读标记
+print(f'1. Register: {username}')
+r = client.post('/api/auth/register', json={'username': username, 'password': '123456'})
+assert r.status_code == 200, f"失败: {r.text}"
+token = r.json()['access_token']
+headers = {'Authorization': f'Bearer {token}'}
+```
+
+### 手动测试
+
+```bash
+# 注册
+curl -X POST http://localhost:8000/api/auth/register \
+  -H "Content-Type: application/json" \
+  -d '{"username":"test","password":"123456"}'
+
+# 查看 API 的 OpenAPI 文档
+# http://localhost:8000/docs
+```
+
+---
+
+## 代码规范
+
+### Python
+
+| 规范 | 要求 |
+|------|------|
+| 版本 | Python 3.11+ |
+| 格式 | 通用 PEP 8，无格式化工具要求 |
+| import 顺序 | 标准库 → 第三方 → 本地（见已有文件） |
+| 路由函数 | 不强制标注 `response_model`，但可加 |
+| 类型提示 | 推荐使用，但不强制 |
+
+### 命名约定
+
+| 场景 | 约定 | 示例 |
+|------|------|------|
+| 路由模块文件名 | 复数名词 | `banks.py`, `questions.py` |
+| 路由前缀 | `/api/复数` | `/api/question-banks` |
+| 私有函数 | `_` 前缀 | `_load_exam_questions()` |
+| 前端路由 | hash path | `#/banks`, `#/exam/setup` |
+| API 端点 | RESTful | `POST /import`, `POST /mark` |
+
+### 前端规范
+
+详见 `docs/frontend-style-guide.md`，关键点：
+- 统一使用 Bootstrap 5 + Bootstrap Icons
+- 字体：Poppins（标题）/ Open Sans（正文）
+- Hash 路由，不依赖构建工具
+
+---
+
+## 数据库操作惯例
+
+### 查询
+
+```python
+# 通过 get_db 依赖注入获取 session
+def list_banks(user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+    banks = db.query(QuestionBank).filter(
+        QuestionBank.user_id == user.id
+    ).order_by(QuestionBank.updated_at.desc()).all()
+```
+
+### JSON 字段处理
+
+```python
+# 写入
+bank_ids_str = json.dumps([1, 2, 3])
+options_str = json.dumps(["A.1", "B.2"], ensure_ascii=False)
+
+# 读取
+bank_ids = json.loads(exam.bank_ids)
+is_list = question.answer.startswith("[")
+answer = json.loads(question.answer) if is_list else question.answer
+```
+
+### 事务与提交
+
+```python
+# 简单操作：add + commit
+db.add(record)
+db.commit()
+
+# 复杂操作：flush 获取 id，最后 commit
+db.add(bank)
+db.flush()
+# 现在可以使用 bank.id
+db.commit()
+```
+
+---
+
+## 已知注意事项
+
+| 事项 | 说明 |
+|------|------|
+| 数据库并发 | SQLite 默认不支持并发写。如果服务在多人场景下出现 `database is locked` 错误，可启用 WAL 模式 |
+| 测试隔离 | 集成测试使用随机用户名，但数据库是同一个 `exam.db`。业务数据隔离开销低，但不要依赖测试间的数据清理 |
+| 静态文件缓存 | 修改 CSS/JS 后浏览器可能缓存旧版本。开发时使用 `--reload` 并配合浏览器硬刷新（Ctrl+F5） |
+| 依赖安装 | 如果某些库安装失败（如 `bcrypt` 需要 C 扩展），可尝试：`pip install bcrypt==4.1.3 --no-binary bcrypt` |
+| Python 路径 | 如果使用项目中的 `sys.path.insert(0, '.')`（测试文件），确保工作目录是项目根目录 |

@@ -1,0 +1,605 @@
+# API 参考
+
+所有接口（除注册/登录外）需在请求头携带 `Authorization: Bearer <token>`。
+
+通用状态码：
+- `200` — 成功
+- `201` — 创建成功
+- `204` — 删除成功（无响应体）
+- `400` — 请求参数错误
+- `401` — 未认证 / Token 无效
+- `404` — 资源不存在
+
+---
+
+## 认证
+
+### POST /api/auth/register
+
+注册新用户，自动返回 Token。
+
+**请求体：**
+```json
+{
+  "username": "testuser",
+  "password": "123456"
+}
+```
+
+**响应 (200)：**
+```json
+{
+  "access_token": "eyJ...",
+  "token_type": "bearer",
+  "user": { "id": 1, "username": "testuser" }
+}
+```
+
+**错误：** 400 — 用户名已存在 / 用户名 < 2 字符 / 密码 < 6 字符
+
+---
+
+### POST /api/auth/login
+
+**请求体：**
+```json
+{
+  "username": "testuser",
+  "password": "123456"
+}
+```
+
+**响应 (200)：** 同 register
+
+**错误：** 401 — 用户名或密码错误
+
+---
+
+### GET /api/auth/me
+
+获取当前用户信息。
+
+**响应 (200)：**
+```json
+{ "id": 1, "username": "testuser" }
+```
+
+---
+
+## 题库
+
+### GET /api/question-banks
+
+**响应 (200)：**
+```json
+[
+  {
+    "id": 1,
+    "title": "数据结构基础",
+    "description": "涵盖栈队列链表树",
+    "question_count": 120,
+    "created_at": "2026-05-13T10:00:00",
+    "updated_at": "2026-05-13T10:00:00"
+  }
+]
+```
+
+---
+
+### GET /api/question-banks/:id
+
+**响应 (200)：**
+```json
+{
+  "id": 1,
+  "title": "数据结构基础",
+  "description": "涵盖栈队列链表树",
+  "question_count": 4,
+  "created_at": "2026-05-13T10:00:00",
+  "updated_at": "2026-05-13T10:00:00",
+  "questions": [
+    {
+      "id": 1,
+      "type": "choice",
+      "chapter": "第一章",
+      "content": "1+1=?",
+      "options": "[\"A.1\", \"B.2\", \"C.3\", \"D.4\"]",
+      "answer": "B",
+      "analysis": "1+1=2",
+      "sort_order": 0
+    }
+  ]
+}
+```
+
+注意：`options` 和 `answer` 是原始数据库值，未反序列化。
+
+---
+
+### POST /api/question-banks/import
+
+单题库导入。
+
+**请求体：**
+```json
+{
+  "title": "数据结构基础",
+  "description": "可选描述",
+  "questions": [
+    {
+      "type": "choice",
+      "chapter": "第一章",
+      "content": "1+1=?",
+      "options": ["A.1", "B.2", "C.3", "D.4"],
+      "answer": "B",
+      "analysis": "可选解析"
+    },
+    {
+      "type": "fill",
+      "content": "中国首都是____。",
+      "answer": "北京"
+    },
+    {
+      "type": "fill",
+      "content": "四大发明是____、____、____和____。",
+      "answer": ["造纸术", "印刷术", "火药", "指南针"]
+    },
+    {
+      "type": "judge",
+      "content": "地球是圆的",
+      "answer": "对"
+    }
+  ]
+}
+```
+
+**响应 (201)：**
+```json
+{
+  "id": 1,
+  "title": "数据结构基础",
+  "description": "可选描述",
+  "question_count": 4,
+  "created_at": "2026-05-13T10:00:00",
+  "updated_at": "2026-05-13T10:00:00"
+}
+```
+
+**错误：** 400 — 校验失败（标题为空/题型无效/题目无内容/选择题缺选项等）
+
+---
+
+### POST /api/question-banks/import-multiple
+
+批量导入，请求体为 JSON 数组，每个元素结构与 `/import` 一致。
+
+**响应 (200)：**
+```json
+{
+  "results": [
+    { "success": true, "title": "题库A", "question_count": 10 },
+    { "success": false, "title": "题库B", "error": "校验错误详情" }
+  ]
+}
+```
+
+部分失败不影响其他题库。失败原因在 `error` 字段中。
+
+---
+
+### DELETE /api/question-banks/:id
+
+**响应：** 204 No Content
+
+**错误：** 404 — 题库不存在
+
+---
+
+## 答题
+
+### POST /api/exam/start
+
+**请求体：**
+```json
+{
+  "bank_ids": [1, 2],
+  "mode": "sequential",
+  "types": ["choice", "fill", "judge"],
+  "question_count": null,
+  "timer_mode": "per_question",
+  "choice_timeout": 30,
+  "judge_fill_timeout": 60
+}
+```
+
+| 字段 | 说明 |
+|------|------|
+| `bank_ids` | 必填，至少一个题库 ID |
+| `mode` | `"sequential"` 按排序出题 / `"random"` 打乱 |
+| `types` | 题型筛选，缺省返回全部 |
+| `question_count` | 随机抽取题数，null 或 ≥ 可用题数则全部 |
+| `timer_mode` | `"per_question"` 单题计时 / `"elapsed"` 整卷计时 |
+| `choice_timeout` | 选择题倒计时秒数（per_question 模式） |
+| `judge_fill_timeout` | 填空/判断题倒计时秒数 |
+
+**响应 (200)：**
+```json
+{
+  "exam_id": 42,
+  "total_count": 20,
+  "timer_mode": "per_question",
+  "started_at": "2026-05-13T10:00:00"
+}
+```
+
+**错误：** 400 — 题库不存在 / 没有符合条件的题目
+
+---
+
+### GET /api/exam/:id/current
+
+获取当前题或指定题。
+
+**查询参数：**
+- `index`（可选）— 指定题目索引（0-based），不传则返回第一道未答题
+
+注意：`current_index` 为 1-based（第几题），`index` 查询参数为 0-based。
+
+**响应 (200)——有下一题且未指定 index：**
+```json
+{
+  "exam_id": 42,
+  "current_index": 5,
+  "total_count": 20,
+  "question": {
+    "id": 7,
+    "type": "choice",
+    "chapter": "第一章",
+    "content": "1+1=?",
+    "options": "[\"A.1\", \"B.2\", \"C.3\", \"D.4\"]",
+    "answer": null,
+    "analysis": null,
+    "sort_order": 0
+  },
+  "is_answered": false,
+  "user_answer": null,
+  "is_correct": null,
+  "correct_answer": null
+}
+```
+
+**响应——指定 index 且已答题：**
+```json
+{
+  "exam_id": 42,
+  "current_index": 5,
+  "total_count": 20,
+  "question": {
+    "id": 7,
+    "type": "choice",
+    "chapter": "第一章",
+    "content": "1+1=?",
+    "options": "[\"A.1\", \"B.2\", \"C.3\", \"D.4\"]",
+    "answer": "B",
+    "analysis": "1+1=2",
+    "sort_order": 0
+  },
+  "is_answered": true,
+  "user_answer": "B",
+  "is_correct": true,
+  "correct_answer": "B"
+}
+```
+
+**响应——所有题已答完（无 index 参数时）：**
+```json
+{
+  "exam_id": 42,
+  "current_index": 20,
+  "total_count": 20,
+  "question": null
+}
+```
+
+**错误：** 400 — index 超出范围；404 — 练习不存在
+
+---
+
+### POST /api/exam/:id/answer
+
+**请求体：**
+```json
+{
+  "exam_id": 42,
+  "question_id": 7,
+  "user_answer": "B",
+  "time_spent_seconds": 15
+}
+```
+
+`user_answer` 规则：
+- 选择题：选项字母字符串（如 `"B"`）
+- 填空题单空：字符串（如 `"北京"`）
+- 填空题多空：字符串数组（如 `["造纸术", "印刷术", "火药", "指南针"]`）
+- 判断题：`"对"` 或 `"错"`
+
+**响应 (200)：**
+```json
+{
+  "is_correct": true,
+  "correct_answer": "B",
+  "analysis": "1+1=2",
+  "next_index": 5,
+  "is_last": false
+}
+```
+
+若 `is_last == true`，表示所有题目已答完，练习自动结束。
+
+---
+
+### GET /api/exam/:id/progress
+
+**响应 (200)：**
+```json
+{
+  "total_count": 20,
+  "current_index": 0,
+  "answers": [
+    { "index": 0, "is_correct": true },
+    { "index": 3, "is_correct": false }
+  ]
+}
+```
+
+`answers` 只包含已答题索引，未答不出现。用于前端渲染题号侧边栏。
+
+---
+
+### GET /api/exam/:id/preview
+
+整卷预览，所有题目 + 答案 + 用户答案（如有）。
+
+**响应 (200)：**
+```json
+{
+  "total_count": 20,
+  "questions": [
+    {
+      "index": 0,
+      "id": 7,
+      "type": "choice",
+      "chapter": "第一章",
+      "content": "1+1=?",
+      "options": ["A.1", "B.2", "C.3", "D.4"],
+      "answer": "B",
+      "analysis": "1+1=2",
+      "user_answer": "B",
+      "is_answered": true,
+      "is_correct": true
+    }
+  ]
+}
+```
+
+---
+
+### POST /api/exam/:id/finish
+
+手动结束练习。如已结束则幂等返回。
+
+**响应 (200)：**
+```json
+{ "exam_id": 42, "status": "completed" }
+```
+
+---
+
+### GET /api/exam/:id/result
+
+**响应 (200)：**
+```json
+{
+  "exam_id": 42,
+  "total_count": 20,
+  "correct_count": 16,
+  "wrong_count": 4,
+  "accuracy": 0.8,
+  "duration_seconds": 515,
+  "answers": [
+    {
+      "question_id": 7,
+      "type": "choice",
+      "content": "1+1=?",
+      "options": ["A.1", "B.2", "C.3", "D.4"],
+      "correct_answer": "B",
+      "user_answer": "B",
+      "is_correct": true,
+      "time_spent": 15,
+      "analysis": "1+1=2"
+    }
+  ]
+}
+```
+
+`answers` 按答题顺序排列。`accuracy` 为 0~1 的小数。
+
+---
+
+## 练习历史
+
+### GET /api/history?page=1&page_size=20
+
+**响应 (200)：**
+```json
+[
+  {
+    "id": 42,
+    "bank_ids": "[1, 2]",
+    "mode": "sequential",
+    "question_count": 20,
+    "correct_count": 16,
+    "wrong_count": 4,
+    "accuracy": 0.8,
+    "duration_seconds": 515,
+    "started_at": "2026-05-13T10:00:00"
+  }
+]
+```
+
+只返回 `status == "completed"` 的记录，按时间倒序。
+
+---
+
+### GET /api/history/:id
+
+复用 `/api/exam/:id/result` 的响应格式。用于查看历史详情。
+
+---
+
+## 错题本
+
+### GET /api/wrong-answers
+
+**响应 (200)：**
+```json
+[
+  {
+    "question_id": 7,
+    "bank_title": "数据结构基础",
+    "type": "choice",
+    "chapter": "第一章",
+    "content": "1+1=?",
+    "options": ["A.1", "B.2", "C.3", "D.4"],
+    "correct_answer": "B",
+    "user_answer": "A",
+    "analysis": "1+1=2"
+  }
+]
+```
+
+- 按答题时间倒序
+- 同题目多答只保留最近一次
+- 按 `bank_title` 分组由前端处理
+
+---
+
+## 仪表盘
+
+### GET /api/dashboard
+
+**响应 (200)：**
+```json
+{
+  "total_banks": 5,
+  "total_questions": 360,
+  "total_exams": 42,
+  "average_accuracy": 0.78,
+  "recent_exams": [
+    {
+      "id": 42,
+      "bank_ids": "[1]",
+      "mode": "sequential",
+      "question_count": 20,
+      "correct_count": 16,
+      "wrong_count": 4,
+      "accuracy": 0.8,
+      "duration_seconds": 515,
+      "started_at": "2026-05-13T10:00:00"
+    }
+  ]
+}
+```
+
+`average_accuracy` 基于所有已完成练习的累计正确/错误总数计算，非平均值。`recent_exams` 为最近 5 条。
+
+---
+
+## 背题
+
+### POST /api/review/questions
+
+**请求体：**
+```json
+{
+  "bank_ids": [1, 2],
+  "types": ["choice", "fill"],
+  "chapter": "第一章",
+  "show_reviewing_only": false
+}
+```
+
+| 字段 | 说明 |
+|------|------|
+| `bank_ids` | 必填 |
+| `types` | 筛选题型，缺省返回全部 |
+| `chapter` | 精确筛选章节，缺省返回全部 |
+| `show_reviewing_only` | 为 `true` 时排除 `status == "known"` 的题目 |
+
+**响应 (200)：**
+```json
+[
+  {
+    "id": 1,
+    "type": "choice",
+    "chapter": "第一章",
+    "content": "1+1=?",
+    "options": "[\"A.1\", \"B.2\", \"C.3\", \"D.4\"]",
+    "answer": "B",
+    "analysis": "1+1=2",
+    "sort_order": 0,
+    "review_status": "known"
+  }
+]
+```
+
+未标记过时 `review_status` 为 `null`。背题模式下答案始终可见。
+
+---
+
+### POST /api/review/mark
+
+**请求体：**
+```json
+{
+  "question_id": 1,
+  "status": "known"
+}
+```
+
+`status` 可选 `"known"`（已掌握）或 `"reviewing"`（待复习）。
+
+**响应 (200)：**
+```json
+{
+  "known_count": 5,
+  "reviewing_count": 3,
+  "total_reviewed": 8
+}
+```
+
+---
+
+### GET /api/review/stats
+
+**响应 (200)：**
+```json
+{
+  "known_count": 5,
+  "reviewing_count": 3,
+  "total_reviewed": 8
+}
+```
+
+---
+
+## 健康检查
+
+### GET /api/health
+
+**响应 (200)：**
+```json
+{ "status": "ok" }
+```
+
+无认证要求。用于 Docker healthcheck 和部署验证。

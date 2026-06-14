@@ -25,7 +25,9 @@
 │   ├── banks.py             # 题库管理
 │   ├── exam.py              # 答题流程
 │   ├── history.py           # 练习历史
-│   └── dashboard.py         # 仪表盘聚合
+│   ├── dashboard.py         # 仪表盘聚合
+│   ├── wrong_answers.py     # 错题本
+│   └── review.py            # 背题模式
 ├── requirements.txt
 └── static/
     ├── index.html           # SPA 入口
@@ -77,9 +79,11 @@
 | bank_ids | Text | JSON 数组，所选题库 ID 列表 |
 | mode | String(10) | random/sequential |
 | question_count | Integer | 总题数 |
+| question_ids | Text nullable | JSON 数组，子集题目 ID（为 null 时取全部） |
 | correct_count | Integer | 正确数 |
 | wrong_count | Integer | 错误数 |
 | duration_seconds | Integer | 总用时 |
+| timer_mode | String(15) | per_question/elapsed |
 | status | String(15) | in_progress/completed |
 | started_at | DateTime | 开始时间 |
 | finished_at | DateTime nullable | 完成时间 |
@@ -121,13 +125,17 @@
 ### 题库 `/api/question-banks`
 - `GET /` — 获取当前用户的所有题库
 - `POST /import` — 导入 JSON 题库
+- `POST /import-multiple` — 批量导入题库
 - `DELETE /{id}` — 删除题库
 - `GET /{id}` — 获取题库详情（含题目列表）
 
 ### 答题 `/api/exam`
-- `POST /start` — 开始答题（模式、题库、题型）
-- `GET /{exam_id}/current` — 获取当前题目
+- `POST /start` — 开始答题（模式、题库、题型、计时方式）
+- `GET /{exam_id}/current` — 获取当前题目（支持 `?index=N` 指定题号）
 - `POST /{exam_id}/answer` — 提交答案
+- `GET /{exam_id}/progress` — 获取答题进度（题号侧边栏）
+- `POST /{exam_id}/finish` — 手动结束练习
+- `GET /{exam_id}/preview` — 整卷预览
 - `GET /{exam_id}/result` — 获取答题结果
 
 ### 历史 `/api/history`
@@ -135,7 +143,12 @@
 - `GET /{exam_id}` — 单次练习详情
 
 ### 错题 `/api/wrong-answers`
-- `GET /` — 错题列表
+- `GET /` — 错题列表（按答题时间倒序，同题去重）
+
+### 背题 `/api/review`
+- `POST /questions` — 按题库/题型/章节筛选题目，返回标记状态
+- `POST /mark` — 标记题目掌握状态（known/reviewing）
+- `GET /stats` — 获取背题统计汇总
 
 ### 仪表盘 `/api/dashboard`
 - `GET /` — 聚合统计（总练习次数、总做题数、平均正确率、最近 5 次记录）
