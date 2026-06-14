@@ -1,0 +1,1123 @@
+<!DOCTYPE html>
+<!-- ==================================================================
+     LANDING PAGE · 刷题在线 · 中文 · parchment design system
+     Screen-first product landing page with interactive gallery
+     Sections: Hero · Gallery · Features · Principles · Pricing · FAQ · Footer
+     ================================================================== -->
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<title>刷题在线 · 浏览器打开即用的刷题平台</title>
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="description" content="刷题在线是一个轻量级开源刷题平台，支持题库管理、答题练习、背题模式和错题本。Python + FastAPI，数据库本地存储，一行命令即可部署。">
+<meta property="og:title" content="刷题在线 · 浏览器打开即用的刷题平台">
+<meta property="og:description" content="轻量级开源刷题平台，支持题库管理、答题练习、背题模式和错题本。Python + FastAPI，自部署，数据本地存储。">
+<meta property="og:image" content="screenshots/02-dashboard.png">
+<meta property="og:type" content="website">
+<meta property="og:url" content="https://github.com/Liao-Ke/shuati-online">
+<meta name="twitter:card" content="summary_large_image">
+<meta name="twitter:title" content="刷题在线 · 浏览器打开即用的刷题平台">
+<meta name="twitter:description" content="轻量级开源刷题平台，支持题库管理、答题练习、背题模式和错题本。">
+<meta name="twitter:image" content="screenshots/02-dashboard.png">
+<link rel="icon" type="image/png" sizes="32x32" href="data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAACAAAAAgCAYAAABzenr0AAAACXBIWXMAAAsTAAALEwEAmpwYAAAAxklEQVRYhe2WUQqDMBBA5y96CO9/p5Yepfd/hQI7bRMF0yhRG5kPbZjkzbgJUUT8m1JKcO0dY+wBAHMMBEDb9/EUAH3fH1VVEQCKotgDAKXUIYSAACClHADgWqsQQtrWPgMAOI4DAEBr/Y4xtrXPAIA8z+GcA875F2PMKqV0AIBz/iil3PN6APjG3lsAGPJ9fyqlvj8UQuCcsyGEsdu2+aqqCgCQ53kYYzxyziNKKWKMkb33e5qm79ZsjLH33os8z18Ad+1PjLEvpX4Dl0FpmZCPLYsAAAAASUVORK5CYII=">
+<link rel="canonical" href="https://github.com/Liao-Ke/shuati-online">
+<style>
+/* ========== Tokens ========== */
+
+@font-face {
+  font-family: "TsangerJinKai02";
+  src: url("https://cdn.jsdelivr.net/gh/AlfredoSequeworthy/TsangerJinKai02@main/TsangerJinKai02-W04.woff2") format("woff2");
+  font-weight: 400;
+  font-style: normal;
+  font-display: swap;
+}
+@font-face {
+  font-family: "TsangerJinKai02";
+  src: url("https://cdn.jsdelivr.net/gh/AlfredoSequeworthy/TsangerJinKai02@main/TsangerJinKai02-W05.woff2") format("woff2");
+  font-weight: 500;
+  font-style: normal;
+  font-display: swap;
+}
+
+:root {
+  --parchment:    #f5f4ed;
+  --ivory:        #faf9f5;
+  --warm-sand:    #e8e6dc;
+
+  --brand:        #1B365D;
+  --brand-light:  #2D5A8A;
+  --brand-tint:   #EEF2F7;
+
+  --near-black:   #141413;
+  --dark-warm:    #3d3d3a;
+  --olive:        #504e49;
+  --stone:        #6b6a64;
+
+  --border:       #e8e6dc;
+  --border-soft:  #e5e3d8;
+  --line:         #d8d5c8;
+
+  --serif: "TsangerJinKai02", "Source Han Serif SC",
+           "Noto Serif CJK SC", "Songti SC", "STSong",
+           Georgia, serif;
+  --sans:  var(--serif);
+  --mono:  "JetBrains Mono", "SF Mono", Consolas,
+           "TsangerJinKai02", "Source Han Serif SC",
+           monospace;
+  --latin-ui: "PingFang SC", system-ui, -apple-system, sans-serif;
+
+  --shot-bg: #141318;
+}
+
+* { box-sizing: border-box; }
+html, body { margin: 0; padding: 0; }
+
+body {
+  background: var(--parchment);
+  color: var(--near-black);
+  font-family: var(--serif);
+  font-size: 15px;
+  line-height: 1.58;
+  letter-spacing: 0.4px;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+a {
+  color: var(--brand);
+  text-decoration: none;
+  transition: color 0.15s;
+}
+a:hover { color: var(--brand-light); }
+
+.page {
+  max-width: 1120px;
+  margin: 0 auto;
+  padding: 88px 64px 120px;
+}
+
+/* ========== Buttons ========== */
+
+.btn-primary {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  background: var(--brand);
+  color: var(--ivory);
+  font-family: var(--latin-ui);
+  font-weight: 500;
+  font-size: 15px;
+  font-variant-numeric: lining-nums tabular-nums;
+  letter-spacing: 0.2px;
+  padding: 13px 28px;
+  border-radius: 999px;
+  border: 1.5px solid var(--brand);
+  transition: background 0.15s, border-color 0.15s, transform 0.15s;
+  cursor: pointer;
+  min-width: 158px;
+}
+.btn-primary:hover {
+  background: var(--brand-light);
+  border-color: var(--brand-light);
+  color: var(--ivory);
+  transform: translateY(-1px);
+}
+
+.btn-ghost {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  font-family: var(--latin-ui);
+  font-weight: 500;
+  font-size: 15px;
+  font-variant-numeric: lining-nums tabular-nums;
+  color: var(--brand);
+  background: transparent;
+  padding: 13px 28px;
+  border-radius: 999px;
+  border: 1.5px solid var(--brand);
+  transition: background 0.15s, color 0.15s, transform 0.15s;
+  cursor: pointer;
+  min-width: 158px;
+}
+.btn-ghost:hover {
+  background: var(--brand-tint);
+  color: var(--brand);
+  transform: translateY(-1px);
+}
+
+/* ========== Hero ========== */
+
+.hero {
+  padding-bottom: 48px;
+  border-bottom: 1px solid var(--border-soft);
+  margin-bottom: 80px;
+}
+.eyebrow {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 8px;
+  font-family: var(--latin-ui);
+  font-size: 12px;
+  font-weight: 500;
+  letter-spacing: 0.4px;
+  text-transform: uppercase;
+  color: var(--stone);
+  margin: 0 0 28px;
+}
+.version-link {
+  color: var(--brand);
+  font-weight: 600;
+}
+.version-link:hover { color: var(--brand-light); }
+
+.hero-links {
+  display: flex;
+  gap: 12px;
+  align-items: center;
+}
+.hero-links a {
+  color: var(--stone);
+  display: flex;
+  align-items: center;
+}
+.hero-links a:hover { color: var(--dark-warm); }
+
+.hero h1 {
+  font-family: var(--serif);
+  font-weight: 500;
+  font-size: 88px;
+  line-height: 1.05;
+  letter-spacing: 0;
+  margin: 0 0 18px;
+  color: var(--near-black);
+  opacity: 0;
+  transform: translateY(10px);
+  filter: blur(6px);
+  animation: hero-rise 900ms cubic-bezier(0.16, 1, 0.3, 1) 120ms forwards;
+}
+@keyframes hero-rise {
+  to { opacity: 1; transform: translateY(0); filter: blur(0); }
+}
+
+.hero .tagline {
+  font-family: var(--serif);
+  font-weight: 400;
+  font-size: 20px;
+  line-height: 1.55;
+  letter-spacing: 0.4px;
+  color: var(--olive);
+  margin: 0 0 28px;
+  max-width: 820px;
+}
+
+.hero-tokens {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 18px;
+  margin: 0 0 32px;
+  font-family: var(--latin-ui);
+  font-size: 13px;
+  color: var(--stone);
+}
+.hero-tokens span {
+  display: inline-flex;
+  gap: 6px;
+  align-items: baseline;
+}
+.hero-tokens b {
+  color: var(--dark-warm);
+  font-weight: 500;
+}
+
+.hero-cta {
+  display: flex;
+  align-items: center;
+  gap: 24px;
+  margin-top: 4px;
+}
+
+/* ========== Section primitives ========== */
+
+section { margin-bottom: 72px; }
+.section-head { margin-bottom: 24px; }
+.section-num {
+  font-family: var(--latin-ui);
+  font-weight: 400;
+  font-size: 14px;
+  color: var(--brand);
+  letter-spacing: 0.4px;
+  margin: 0 0 6px;
+}
+.section-title {
+  font-family: var(--serif);
+  font-weight: 500;
+  font-size: 34px;
+  line-height: 1.2;
+  color: var(--near-black);
+  margin: 0;
+  letter-spacing: 1.2px;
+}
+.section-lede {
+  font-family: var(--serif);
+  font-weight: 400;
+  font-size: 17px;
+  line-height: 1.55;
+  letter-spacing: 0.4px;
+  color: var(--olive);
+  margin: 14px 0 0;
+}
+
+/* ========== Gallery (interactive screenshot carousel) ========== */
+
+.gallery {
+  --enter-from-x: 44px;
+  --exit-to-x: -34px;
+  --sweep-angle: 100deg;
+  --sweep-from: -45%;
+  --sweep-to: 65%;
+  --caption-shift: -2px;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  column-gap: 24px;
+  align-items: baseline;
+  margin: 0;
+  padding: 0;
+}
+.gallery[data-direction="prev"] {
+  --enter-from-x: -44px;
+  --exit-to-x: 34px;
+  --sweep-angle: 260deg;
+  --sweep-from: 65%;
+  --sweep-to: -45%;
+  --caption-shift: 2px;
+}
+
+.gallery-frame {
+  grid-column: 1 / -1;
+  position: relative;
+  background: var(--shot-bg);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  overflow: hidden;
+  box-shadow: 0 1px 3px rgba(20, 19, 19, 0.10);
+  cursor: ew-resize;
+}
+.gallery-frame::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  z-index: 4;
+  pointer-events: none;
+  background: linear-gradient(
+    var(--sweep-angle),
+    rgba(245, 244, 237, 0) 32%,
+    rgba(245, 244, 237, 0.16) 50%,
+    rgba(245, 244, 237, 0) 68%
+  );
+  opacity: 0;
+  transform: translate3d(var(--sweep-from), 0, 0);
+  transition:
+    opacity 540ms ease,
+    transform 920ms cubic-bezier(0.22, 1, 0.36, 1);
+}
+.gallery.is-switching .gallery-frame::after {
+  opacity: 1;
+  transform: translate3d(var(--sweep-to), 0, 0);
+}
+.gallery-panel {
+  position: absolute;
+  inset: 0;
+  margin: 0;
+  opacity: 0;
+  visibility: hidden;
+  z-index: 1;
+  transform: translate3d(var(--enter-from-x), 0, 0) scale(0.985);
+  transition:
+    opacity 620ms cubic-bezier(0.22, 1, 0.36, 1),
+    transform 880ms cubic-bezier(0.22, 1, 0.36, 1),
+    visibility 620ms;
+  will-change: opacity, transform;
+}
+.gallery-panel.is-active {
+  opacity: 1;
+  visibility: visible;
+  position: relative;
+  z-index: 2;
+  transform: translate3d(0, 0, 0) scale(1);
+}
+.gallery-panel.was-active {
+  opacity: 0;
+  visibility: visible;
+  position: absolute;
+  inset: 0;
+  z-index: 3;
+  transform: translate3d(var(--exit-to-x), 0, 0) scale(0.985);
+  pointer-events: none;
+}
+.gallery-panel img {
+  width: 100%;
+  height: auto;
+  display: block;
+}
+
+.gallery-caption {
+  grid-column: 1;
+  grid-row: 2;
+  min-height: 48px;
+  padding: 12px 2px 0;
+  display: flex;
+  align-items: baseline;
+  gap: 14px;
+  transition: opacity 420ms ease, transform 520ms cubic-bezier(0.22, 1, 0.36, 1);
+}
+.gallery.is-switching .gallery-caption {
+  opacity: 0.72;
+  transform: translate3d(var(--caption-shift), 0, 0);
+}
+.gallery-caption .title {
+  font-family: var(--serif);
+  font-weight: 500;
+  font-size: 17px;
+  color: var(--near-black);
+  margin: 0;
+  letter-spacing: 0.1px;
+  flex: 0 0 auto;
+}
+.gallery-caption .line {
+  font-family: var(--serif);
+  font-size: 14px;
+  color: var(--olive);
+  font-style: italic;
+  letter-spacing: 0.4px;
+  margin: 0;
+}
+
+.gallery-tabs {
+  grid-column: 2;
+  grid-row: 2;
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+  margin-top: 12px;
+  justify-content: flex-end;
+}
+.gallery-tabs button {
+  appearance: none;
+  border: 1px solid var(--border-soft);
+  border-radius: 999px;
+  background: transparent;
+  color: var(--olive);
+  font-family: var(--latin-ui);
+  font-size: 12px;
+  line-height: 1;
+  padding: 8px 12px;
+  cursor: pointer;
+  transition: color 0.18s ease, border-color 0.18s ease, background 0.18s ease;
+}
+.gallery-tabs button:hover {
+  color: var(--brand);
+  border-color: var(--line);
+}
+.gallery-tabs button.is-active {
+  color: var(--brand);
+  background: var(--brand-tint);
+  border-color: var(--line);
+}
+
+/* ========== Features (two-column definition list) ========== */
+
+.features {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  border-top: 1px solid var(--border-soft);
+}
+.features li {
+  display: grid;
+  grid-template-columns: 200px 1fr;
+  column-gap: 36px;
+  padding: 28px 0;
+  border-bottom: 1px solid var(--border-soft);
+  align-items: baseline;
+}
+.features .name {
+  font-family: var(--serif);
+  font-weight: 500;
+  font-size: 22px;
+  color: var(--brand);
+  margin: 0;
+  line-height: 1.25;
+}
+.features .name small {
+  display: block;
+  margin-top: 4px;
+  font-family: var(--serif);
+  font-size: 13px;
+  color: var(--olive);
+  font-weight: 400;
+  font-style: italic;
+  line-height: 1.5;
+  letter-spacing: 0.1px;
+}
+.features .what {
+  font-family: var(--serif);
+  font-size: 15px;
+  line-height: 1.55;
+  letter-spacing: 0.4px;
+  color: var(--dark-warm);
+  margin: 0;
+}
+
+/* ========== Principles (2-column numbered grid) ========== */
+
+.principles {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: 0;
+  border-top: 1px solid var(--border-soft);
+}
+.principles li {
+  display: grid;
+  grid-template-columns: 32px 1fr;
+  gap: 8px;
+  padding: 22px 28px 22px 0;
+  border-bottom: 1px solid var(--border-soft);
+  align-items: baseline;
+}
+.principles li:nth-child(odd) {
+  padding-right: 32px;
+  border-right: 1px solid var(--border-soft);
+}
+.principles li:nth-child(even) { padding-left: 32px; }
+.principles li:last-child:nth-child(odd) {
+  grid-column: 1 / -1;
+  border-right: none;
+  padding-right: 0;
+}
+.principles .n {
+  font-family: var(--serif);
+  font-weight: 500;
+  font-size: 18px;
+  color: var(--brand);
+  line-height: 1;
+}
+.principles .body b {
+  display: block;
+  font-family: var(--serif);
+  font-weight: 500;
+  font-size: 15px;
+  color: var(--near-black);
+  margin-bottom: 4px;
+  letter-spacing: 0.1px;
+}
+.principles .body span {
+  font-size: 13px;
+  color: var(--olive);
+  line-height: 1.5;
+  letter-spacing: 0.4px;
+  font-weight: 400;
+}
+
+/* ========== Code block (install instructions) ========== */
+
+pre.code {
+  background: var(--ivory);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 18px 22px;
+  font-family: var(--mono);
+  font-size: 13.5px;
+  line-height: 1.55;
+  font-variant-numeric: lining-nums tabular-nums;
+  color: var(--near-black);
+  overflow-x: auto;
+  margin: 0;
+}
+pre.code .c { color: var(--stone); }
+pre.code .k { color: var(--brand); }
+
+/* ========== Metrics (key numbers) ========== */
+
+.metrics {
+  display: flex;
+  gap: 32px;
+  flex-wrap: wrap;
+}
+.metric {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.metric-value {
+  font-family: var(--serif);
+  font-weight: 500;
+  font-size: 36px;
+  line-height: 1;
+  color: var(--near-black);
+  font-variant-numeric: lining-nums tabular-nums;
+}
+.metric-label {
+  font-family: var(--latin-ui);
+  font-size: 13px;
+  color: var(--stone);
+}
+
+/* ========== Pricing ========== */
+
+.price-card {
+  max-width: 960px;
+  margin: 0 auto;
+  padding: 72px 32px 64px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  text-align: center;
+  border-top: 1px solid var(--line);
+  border-bottom: 1px solid var(--line);
+}
+.price-amount {
+  font-family: Georgia, Charter, serif;
+  font-weight: 500;
+  font-size: 112px;
+  line-height: 1;
+  color: var(--near-black);
+  margin: 0 0 24px;
+  letter-spacing: 0;
+}
+.price-vs {
+  font-family: var(--serif);
+  font-size: 17px;
+  color: var(--dark-warm);
+  margin: 0 0 40px;
+  line-height: 1.55;
+  max-width: 580px;
+}
+.price-vs s {
+  color: var(--stone);
+  text-decoration-thickness: 1px;
+  text-decoration-color: var(--stone);
+  margin: 0 2px;
+}
+.price-vs .hl {
+  color: var(--brand);
+  font-weight: 500;
+}
+.price-card .btn-primary {
+  min-width: 280px;
+  padding: 15px 28px;
+  font-size: 15.5px;
+  justify-content: center;
+}
+.price-trial {
+  font-family: var(--serif);
+  font-size: 14px;
+  color: var(--stone);
+  margin: 16px 0 0;
+}
+.price-trial a {
+  color: var(--brand);
+  text-decoration: underline;
+  text-underline-offset: 3px;
+  text-decoration-thickness: 1px;
+}
+.price-trial a:hover { color: var(--brand-light); }
+.price-terms {
+  font-family: var(--serif);
+  font-size: 13.5px;
+  color: var(--olive);
+  margin: 28px 0 0;
+  max-width: 640px;
+  line-height: 1.5;
+  text-align: center;
+}
+
+/* ========== FAQ ========== */
+
+.faq-pair { margin-bottom: 24px; }
+.faq-pair:last-child { margin-bottom: 0; }
+.faq dt {
+  font-family: var(--serif);
+  font-weight: 500;
+  font-size: 16px;
+  color: var(--near-black);
+  margin: 0 0 6px;
+  letter-spacing: 0.1px;
+}
+.faq dd {
+  font-family: var(--serif);
+  font-size: 14px;
+  line-height: 1.55;
+  letter-spacing: 0.4px;
+  color: var(--olive);
+  margin: 0;
+}
+.faq code {
+  font-family: var(--mono);
+  font-size: 12px;
+  color: var(--brand);
+  background: var(--brand-tint);
+  padding: 1px 6px;
+  border-radius: 3px;
+}
+.faq-tail {
+  font-family: var(--serif);
+  font-size: 13px;
+  color: var(--stone);
+  margin: 28px 0 0;
+}
+.faq-tail a { color: var(--brand); }
+
+/* ========== Footer ========== */
+
+footer.foot {
+  margin-top: 56px;
+  padding-top: 40px;
+  border-top: 1px solid var(--border-soft);
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-end;
+  gap: 48px;
+  font-family: var(--serif);
+  font-size: 13px;
+  color: var(--stone);
+}
+.foot .mark {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.foot .mark .wm-name {
+  font-family: var(--serif);
+  font-weight: 500;
+  font-size: 28px;
+  color: var(--near-black);
+  line-height: 1.1;
+  letter-spacing: 0;
+}
+.foot .mark .wm-line {
+  font-size: 13px;
+  color: var(--olive);
+  margin-top: 2px;
+}
+.foot .colophon {
+  text-align: right;
+  max-width: 480px;
+}
+.foot .colophon .links {
+  font-family: var(--latin-ui);
+  color: var(--dark-warm);
+  margin-bottom: 16px;
+  line-height: 1.55;
+}
+.foot .colophon .links a {
+  color: var(--dark-warm);
+}
+.foot .colophon .links a:hover { color: var(--brand); }
+.foot .colophon .ethos {
+  color: var(--olive);
+  font-style: italic;
+  line-height: 1.55;
+  max-width: 360px;
+  margin-left: auto;
+}
+
+/* ========== Print ========== */
+
+@media print {
+  body { background: #f5f4ed; -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+  .page { padding: 0; max-width: 100%; }
+  section { page-break-inside: auto; margin-bottom: 36px; }
+  .hero, .section-head, .demo-card, .price-card, blockquote, pre { break-inside: avoid; page-break-inside: avoid; }
+  .gallery-frame::after { display: none; }
+}
+
+/* ========== Responsive ========== */
+
+@media (max-width: 880px) {
+  .page { padding: 64px 32px 80px; }
+  .hero { margin-bottom: 56px; padding-bottom: 32px; }
+  .hero h1 { font-size: 56px; letter-spacing: 0; }
+  .hero .tagline { font-size: 17px; }
+
+  section { margin-bottom: 56px; }
+  .section-title { font-size: 30px; letter-spacing: 0.8px; }
+
+  .gallery { grid-template-columns: 1fr; }
+  .gallery-caption,
+  .gallery-tabs { grid-column: 1; grid-row: auto; }
+  .gallery-tabs { gap: 6px; justify-content: flex-start; }
+  .gallery-tabs button { padding: 8px 10px; }
+
+  .features li {
+    grid-template-columns: 1fr;
+    row-gap: 8px;
+    padding: 22px 0;
+  }
+
+  .principles { grid-template-columns: 1fr; }
+  .principles li:nth-child(odd) { border-right: none; padding-right: 0; }
+  .principles li:nth-child(even) { padding-left: 0; }
+
+  .price-card { padding: 48px 16px 40px; }
+  .price-amount { font-size: 72px; letter-spacing: 0; margin-bottom: 18px; }
+  .price-vs { font-size: 15px; margin-bottom: 32px; }
+  .price-card .btn-primary { min-width: 240px; }
+  .price-terms { font-size: 12.5px; line-height: 1.5; margin-top: 24px; }
+
+  .foot {
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 32px;
+    padding-top: 32px;
+    margin-top: 48px;
+  }
+  .foot .colophon { text-align: left; max-width: 100%; }
+  .foot .colophon .ethos { margin-left: 0; }
+  .foot { align-items: flex-start; }
+}
+
+@media (max-width: 480px) {
+  .page { padding: 48px 20px 64px; }
+  .hero h1 { font-size: 48px; }
+  .hero .tagline { font-size: 16px; }
+  .hero-cta { flex-direction: row; align-items: center; gap: 12px; }
+  .btn-primary,
+  .btn-ghost { min-width: 0; flex: 1; padding: 13px 16px; justify-content: center; }
+  .gallery-caption {
+    min-height: auto;
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 4px;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .hero h1 { animation: none; opacity: 1; transform: none; filter: none; }
+  .gallery-frame::after { display: none; }
+  .gallery-panel,
+  .gallery-caption { transition: none; transform: none; }
+}
+</style>
+</head>
+<body>
+<main class="page">
+
+  <!-- ============ Hero ============ -->
+  <header class="hero">
+    <div class="eyebrow">
+      <span>开源刷题平台 · <a class="version-link" href="https://github.com/Liao-Ke/shuati-online">v1.0</a></span>
+      <span class="hero-links">
+        <a href="https://github.com/Liao-Ke/shuati-online" target="_blank" rel="noopener" aria-label="GitHub">
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor"><path d="M12 0C5.37 0 0 5.37 0 12c0 5.3 3.438 9.8 8.205 11.385.6.113.82-.258.82-.577 0-.285-.01-1.04-.015-2.04-3.338.724-4.042-1.61-4.042-1.61-.546-1.385-1.335-1.755-1.335-1.755-1.087-.744.084-.729.084-.729 1.205.084 1.838 1.236 1.838 1.236 1.07 1.835 2.809 1.305 3.495.998.108-.776.417-1.305.76-1.605-2.665-.3-5.466-1.332-5.466-5.93 0-1.31.465-2.38 1.235-3.22-.135-.303-.54-1.523.105-3.176 0 0 1.005-.322 3.3 1.23.96-.267 1.98-.399 3-.405 1.02.006 2.04.138 3 .405 2.28-1.552 3.285-1.23 3.285-1.23.645 1.653.24 2.873.12 3.176.765.84 1.23 1.91 1.23 3.22 0 4.61-2.805 5.625-5.475 5.92.42.36.81 1.096.81 2.22 0 1.606-.015 2.896-.015 3.286 0 .315.21.69.825.57C20.565 21.795 24 17.295 24 12 24 5.37 18.63 0 12 0z"/></svg>
+        </a>
+      </span>
+    </div>
+
+    <h1>刷题在线</h1>
+
+    <p class="tagline">打开浏览器就能用的刷题平台。导入题库，开始作答，即时反馈。</p>
+
+    <div class="hero-tokens">
+      <span><b>Python</b> 后端</span>
+      <span><b>FastAPI</b> 框架</span>
+      <span><b>SQLite</b> 存储</span>
+      <span><b>Docker</b> 部署</span>
+      <span><b>MIT</b> 开源</span>
+    </div>
+
+    <div class="hero-cta">
+      <a class="btn-ghost" href="https://github.com/Liao-Ke/shuati-online" target="_blank" rel="noopener">查看源码</a>
+      <a class="btn-primary" href="https://exam.proxy.lsk.icu" target="_blank" rel="noopener">开始使用</a>
+    </div>
+  </header>
+
+  <!-- ============ 00 · Gallery ============ -->
+  <section>
+    <div class="section-head">
+      <p class="section-num">00 · 界面预览</p>
+      <h2 class="section-title">看一眼就知道顺不顺手</h2>
+      <p class="section-lede">从仪表盘到逐题回顾，每个界面只服务于一件事：让你专注做题。</p>
+    </div>
+
+    <div class="gallery" data-gallery>
+      <div class="gallery-frame" aria-live="polite">
+        <figure class="gallery-panel" data-title="数据总览" data-line="题库数、练习次数、正确率，一眼看完">
+          <img src="screenshots/02-dashboard.png" alt="仪表盘界面">
+        </figure>
+        <figure class="gallery-panel" data-title="答题配置" data-line="题库·模式·题量·题型·计时，开答前选好就行">
+          <img src="screenshots/04-exam-setup.png" alt="答题设置界面">
+        </figure>
+        <figure class="gallery-panel" data-title="逐题作答" data-line="选择即选，提交即判，解析同步呈现">
+          <img src="screenshots/05-exam-progress.png" alt="答题进行界面">
+        </figure>
+        <figure class="gallery-panel" data-title="结果复盘" data-line="正确率、用时、每道题的回看，一次练习一次迭代">
+          <img src="screenshots/10-result.png" alt="答题结果界面">
+        </figure>
+        <figure class="gallery-panel" data-title="背题模式" data-line="题目与答案一并展示，快速过完整个题库">
+          <img src="screenshots/08-review.png" alt="背题模式界面">
+        </figure>
+      </div>
+      <div class="gallery-caption">
+        <p class="title" data-gallery-title></p>
+        <p class="line" data-gallery-line></p>
+      </div>
+      <div class="gallery-tabs" aria-label="选择截图">
+        <button aria-pressed="true">总览</button>
+        <button aria-pressed="false">配置</button>
+        <button aria-pressed="false">答题</button>
+        <button aria-pressed="false">结果</button>
+        <button aria-pressed="false">背题</button>
+      </div>
+    </div>
+  </section>
+
+  <!-- ============ 01 · Features ============ -->
+  <section>
+    <div class="section-head">
+      <p class="section-num">01 · 功能</p>
+      <h2 class="section-title">刷题需要的一切，一个不少</h2>
+    </div>
+
+    <ol class="features">
+      <li>
+        <p class="name">题库管理<small>导入即用</small></p>
+        <p class="what">支持 JSON 格式批量导入，一次导入整个题库。多文件同时上传，章节自动归类。内置示例 JSON，格式一看就懂。</p>
+      </li>
+      <li>
+        <p class="name">答题练习<small>模式任选</small></p>
+        <p class="what">顺序模式按章节逐题推进，随机模式打乱出题顺序。单题视图聚焦当前题目，整卷预览一览全局。支持多题库组合练习。</p>
+      </li>
+      <li>
+        <p class="name">背题模式<small>一次过完</small></p>
+        <p class="what">直接展示题目与答案，逐题标记"记住了"或"待复习"。适合考前突击或首次熟悉题库内容，效率远高于逐题作答。</p>
+      </li>
+      <li>
+        <p class="name">计时系统<small>节奏自控</small></p>
+        <p class="what">两种计时方案：单题倒计时为每道题设置时间压力，整卷计时记录总用时但不限时作答。倒计时少于 10 秒自动警示。</p>
+      </li>
+      <li>
+        <p class="name">错题本<small>自动收集</small></p>
+        <p class="what">答错的题目自动进入错题本，按题库分组去重。随时回顾错误，针对性补强薄弱环节。支持从错题本直接进入背题模式。</p>
+      </li>
+      <li>
+        <p class="name">练习历史<small>可回溯</small></p>
+        <p class="what">每次练习自动存档，分页列表清晰呈现。点击即可查看逐题回顾——你的答案、正确答案、解析，全部可查。方便追踪进步轨迹。</p>
+      </li>
+    </ol>
+  </section>
+
+  <!-- ============ 02 · Principles ============ -->
+  <section>
+    <div class="section-head">
+      <p class="section-num">02 · 设计原则</p>
+      <h2 class="section-title">为专注学习而设计</h2>
+    </div>
+
+    <ol class="principles">
+      <li>
+        <span class="n">01</span>
+        <div class="body">
+          <b>学习为王</b>
+          <span>功能全部聚焦刷题场景。没有社交动态，没有广告推送，没有冗余功能干扰注意力。</span>
+        </div>
+      </li>
+      <li>
+        <span class="n">02</span>
+        <div class="body">
+          <b>即时反馈</b>
+          <span>提交答案的瞬间就知道对错。选择题、填空题、判断题，每题都有解析。不把疑问留到下一题。</span>
+        </div>
+      </li>
+      <li>
+        <span class="n">03</span>
+        <div class="body">
+          <b>数据属于你</b>
+          <span>自部署方案，数据库文件就在你服务器上。没有云同步、没有第三方存储、没有账号体系之外的追踪。</span>
+        </div>
+      </li>
+      <li>
+        <span class="n">04</span>
+        <div class="body">
+          <b>轻量启动</b>
+          <span>Python + SQLite 的组合，无需安装外部数据库。pip install + uvicorn 两步启动，或者一行 docker compose up -d 完成部署。</span>
+        </div>
+      </li>
+    </ol>
+  </section>
+
+  <!-- ============ 03 · Pricing ============ -->
+  <section>
+    <div class="section-head">
+      <p class="section-num">03 · 定价</p>
+      <h2 class="section-title">没有隐藏费用</h2>
+    </div>
+
+    <div class="price-card">
+      <p class="price-amount">¥0</p>
+      <p class="price-vs">
+        同类刷题平台年费 <s>¥200-500</s> · <span class="hl">刷题在线完全免费</span>，<br>你只需要一台能跑 Python 的服务器。
+      </p>
+      <a class="btn-primary" href="https://github.com/Liao-Ke/shuati-online" target="_blank" rel="noopener">从 GitHub 获取</a>
+      <p class="price-trial">MIT 协议 · 可自由修改和再分发</p>
+      <p class="price-terms">
+        无需注册账号即可查看源码。本地运行零成本，Docker 部署约 50MB 镜像。
+      </p>
+    </div>
+  </section>
+
+  <!-- ============ 04 · FAQ ============ -->
+  <section>
+    <div class="section-head">
+      <p class="section-num">04 · 常见问题</p>
+      <h2 class="section-title">你想问的，这里都有</h2>
+    </div>
+
+    <dl class="faq">
+      <div class="faq-pair">
+        <dt>这个平台和商业化刷题 App 有什么区别？</dt>
+        <dd>刷题在线是自部署的开源工具，数据存在你自己的服务器上。商业 App 通常走订阅制、数据上云、附带社交和广告功能。这里什么都没有——只有题目和你。</dd>
+      </div>
+      <div class="faq-pair">
+        <dt>需要联网才能用吗？</dt>
+        <dd>部署后完全离线可用。浏览器和服务器在同一台机器上即可运行。适合机房考试、离线学习等场景。</dd>
+      </div>
+      <div class="faq-pair">
+        <dt>数据安全吗？</dt>
+        <dd>数据库是本地 SQLite 文件，没有外部请求发送，没有用户数据离开你的服务器。JWT 认证保护接口访问。</dd>
+      </div>
+      <div class="faq-pair">
+        <dt>如何导入自己的题库？</dt>
+        <dd>按指定 JSON 格式准备题库文件，在题库管理页面点击"导入"上传即可。支持选择题、填空题、判断题三类题型。页面提供示例 JSON 下载，对照格式填写即可。</dd>
+      </div>
+      <div class="faq-pair">
+        <dt>支持哪些题型？</dt>
+        <dd>目前支持选择题（四选一）、填空题（文本输入）、判断题（对/错）。每种题型都有独立的计时配置和批改逻辑。</dd>
+      </div>
+      <div class="faq-pair">
+        <dt>需要什么技术背景才能部署？</dt>
+        <dd>会打开终端就够了。有 Python 环境就 <code>pip install -r requirements.txt && uvicorn main:app</code>，有 Docker 就 <code>docker compose up -d</code>。两种方式都已在 README 中写明步骤。</dd>
+      </div>
+    </dl>
+    <p class="faq-tail">还有问题？请在 <a href="https://github.com/Liao-Ke/shuati-online/issues" target="_blank" rel="noopener">GitHub Issues</a> 提出。</p>
+  </section>
+
+  <!-- ============ Footer ============ -->
+  <footer class="foot">
+    <div class="mark">
+      <span class="wm-name">刷题在线</span>
+      <span class="wm-line">浏览器打开即用的刷题平台</span>
+    </div>
+    <div class="colophon">
+      <div class="links">
+        <a href="https://github.com/Liao-Ke/shuati-online" target="_blank" rel="noopener">GitHub</a> &middot;
+        <a href="https://github.com/Liao-Ke/shuati-online/issues" target="_blank" rel="noopener">反馈</a> &middot;
+        <a href="https://exam.proxy.lsk.icu" target="_blank" rel="noopener">在线体验</a>
+      </div>
+      <p class="ethos">没有冗余社交，没有隐藏费用。只有你和题目。</p>
+    </div>
+  </footer>
+
+</main>
+
+<script>
+(function(){
+  var gallery = document.querySelector('[data-gallery]');
+  if (!gallery) return;
+  var frame = gallery.querySelector('.gallery-frame');
+  var panels = Array.prototype.slice.call(gallery.querySelectorAll('.gallery-panel'));
+  var tabs = Array.prototype.slice.call(gallery.querySelectorAll('.gallery-tabs button'));
+  var title = gallery.querySelector('[data-gallery-title]');
+  var line = gallery.querySelector('[data-gallery-line]');
+  var index = 0;
+  var timer = null;
+  var transitionTimer = null;
+  var reduceMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+
+  if (panels.length === 0) return;
+  if (panels.length === 1) {
+    panels[0].classList.add('is-active');
+    panels[0].setAttribute('aria-hidden', 'false');
+    if (title) title.textContent = panels[0].dataset.title || '';
+    if (line) line.textContent = panels[0].dataset.line || '';
+    tabs.forEach(function(t) {
+      t.classList.add('is-active');
+      t.setAttribute('aria-pressed', 'true');
+    });
+    return;
+  }
+
+  if (panels.length > 0 && title) {
+    title.textContent = panels[0].dataset.title || '';
+    if (line) line.textContent = panels[0].dataset.line || '';
+  }
+
+  function activate(next) {
+    if (next === index) return;
+    var previous = index;
+    var direction = (next - previous + panels.length) % panels.length;
+    gallery.dataset.direction = direction > panels.length / 2 ? 'prev' : 'next';
+    if (transitionTimer) window.clearTimeout(transitionTimer);
+    panels.forEach(function(p) { p.classList.remove('was-active'); });
+    var outgoing = panels[previous];
+    if (outgoing) outgoing.classList.add('was-active');
+    gallery.classList.add('is-switching');
+    transitionTimer = window.setTimeout(function() {
+      gallery.classList.remove('is-switching');
+      if (outgoing) outgoing.classList.remove('was-active');
+      transitionTimer = null;
+    }, 920);
+    index = next;
+    panels.forEach(function(p, i) {
+      var active = i === index;
+      p.classList.toggle('is-active', active);
+      p.setAttribute('aria-hidden', active ? 'false' : 'true');
+    });
+    tabs.forEach(function(t, i) {
+      var active = i === index;
+      t.classList.toggle('is-active', active);
+      t.setAttribute('aria-pressed', active ? 'true' : 'false');
+    });
+    if (title) title.textContent = panels[index].dataset.title || '';
+    if (line) line.textContent = panels[index].dataset.line || '';
+  }
+
+  function start() {
+    if (reduceMotion || timer) return;
+    timer = window.setInterval(function() {
+      activate((index + 1) % panels.length);
+    }, 4500);
+  }
+  function stop() {
+    if (!timer) return;
+    window.clearInterval(timer);
+    timer = null;
+  }
+
+  tabs.forEach(function(tab, i) {
+    tab.addEventListener('click', function() { stop(); activate(i); start(); });
+  });
+  if (frame) {
+    frame.addEventListener('click', function(e) {
+      var box = frame.getBoundingClientRect();
+      var next = e.clientX < box.left + box.width / 2
+        ? (index - 1 + panels.length) % panels.length
+        : (index + 1) % panels.length;
+      stop(); activate(next); start();
+    });
+  }
+  gallery.addEventListener('mouseenter', stop);
+  gallery.addEventListener('mouseleave', start);
+  gallery.addEventListener('focusin', stop);
+  gallery.addEventListener('focusout', start);
+  start();
+})();
+</script>
+</body>
+</html>
