@@ -232,6 +232,25 @@ def submit_answer(data: AnswerSubmit, user: User = Depends(get_current_user), db
     )
 
 
+@router.post("/{exam_id}/finish")
+def finish_exam(
+    exam_id: int,
+    user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    exam = db.query(ExamRecord).filter(
+        ExamRecord.id == exam_id, ExamRecord.user_id == user.id
+    ).first()
+    if not exam:
+        raise HTTPException(status_code=404, detail="练习不存在")
+    if exam.status == "completed":
+        return {"exam_id": exam.id, "status": "completed"}
+    exam.status = "completed"
+    exam.finished_at = __import__("datetime").datetime.utcnow()
+    db.commit()
+    return {"exam_id": exam.id, "status": "completed"}
+
+
 @router.get("/{exam_id}/result", response_model=ExamResult)
 def exam_result(exam_id: int, user: User = Depends(get_current_user), db: Session = Depends(get_db)):
     exam = db.query(ExamRecord).filter(

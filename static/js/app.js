@@ -43,6 +43,8 @@ let examTimerInterval = null;
 let examTimeoutSeconds = 30;
 let examCurrentIndex = 0;
 let examProgress = null;
+let examPaused = false;
+let examPauseRemaining = 0;
 
 async function checkAuth() {
   if (!api.token) return false;
@@ -384,6 +386,10 @@ router.add('/exam', async () => {
         <div class="exam-header">
           <div class="d-flex justify-content-between align-items-center mb-2">
             <span id="exam-progress-text">第 0/0 题</span>
+            <div class="d-flex align-items-center gap-2">
+              <button class="btn btn-outline-secondary btn-sm" id="pause-btn" onclick="pauseExam()">⏸ 暂停</button>
+              <button class="btn btn-outline-danger btn-sm" id="finish-btn" onclick="finishExam()">✕ 结束</button>
+            </div>
             <span id="exam-timer" class="exam-timer">0:00</span>
           </div>
           <div class="progress exam-progress"><div id="exam-progress-bar" class="progress-bar" style="width:0%"></div></div>
@@ -394,6 +400,14 @@ router.add('/exam', async () => {
           </div>
         </div>
         <div id="exam-content" class="text-center py-5"><div class="spinner-border"></div></div>
+        <div id="exam-pause-overlay" class="exam-pause-overlay d-none" onclick="resumeExam()">
+          <div class="exam-pause-box">
+            <div class="exam-pause-icon">⏸</div>
+            <div class="exam-pause-text">已暂停</div>
+            <button class="btn btn-primary btn-lg" onclick="event.stopPropagation();resumeExam()">▶ 继续答题</button>
+            <p class="text-muted mt-2 mb-0 small">按空格键继续</p>
+          </div>
+        </div>
       </div>
       <div class="exam-sidebar" id="exam-sidebar">
         <div class="exam-sidebar-header">题目列表</div>
@@ -407,10 +421,21 @@ router.add('/exam', async () => {
     </div>
   `);
   examCurrentIndex = 0;
+  examPaused = false;
+  examPauseRemaining = 0;
+  document.removeEventListener('keydown', examKeyHandler);
   examProgress = await api.getExamProgress(examId);
   renderQuestionGrid();
   loadQuestionByIndex(0);
+  document.addEventListener('keydown', examKeyHandler);
 });
+
+function examKeyHandler(e) {
+  if (e.key === ' ' && examPaused) {
+    e.preventDefault();
+    resumeExam();
+  }
+}
 
 router.add('/result/:id', async ({ id }) => {
   showNav();
@@ -961,9 +986,45 @@ async function loadQuestionByIndex(index) {
 }
 
 function navigateExam(delta) {
+  if (examPaused) return;
   const newIndex = examCurrentIndex + delta;
   if (newIndex < 0 || newIndex >= examTotalCount) return;
   loadQuestionByIndex(newIndex);
+}
+
+function pauseExam() {
+  if (examPaused) return;
+  clearInterval(examTimerInterval);
+  examTimerInterval = null;
+  examPaused = true;
+  const timerEl = document.getElementById('exam-timer');
+  examPauseRemaining = parseTime(timerEl.textContent);
+  document.getElementById('exam-pause-overlay').classList.remove('d-none');
+}
+
+function resumeExam() {
+  if (!examPaused) return;
+  examPaused = false;
+  document.getElementById('exam-pause-overlay').classList.add('d-none');
+  startTimer(examPauseRemaining);
+}
+
+async function finishExam() {
+  if (!confirm('确定要提前结束吗？未答的题目将不计入成绩。')) return;
+  if (examPaused) resumeExam();
+  clearInterval(examTimerInterval);
+  try {
+    await api.finishExam(examId);
+    document.removeEventListener('keydown', examKeyHandler);
+    router.navigate(`/result/${examId}`);
+  } catch (err) {
+    alert('结束失败: ' + err.message);
+  }
+}
+
+function parseTime(str) {
+  const parts = str.split(':');
+  return parseInt(parts[0]) * 60 + parseInt(parts[1]);
 }
 
 function selectChoice(el, value) {
@@ -973,8 +1034,8 @@ function selectChoice(el, value) {
   document.getElementById('submit-answer-btn').disabled = false;
 }
 
-function startTimer() {
-  let remaining = examTimeoutSeconds;
+function startTimer(remaining) {
+  if (remaining === undefined) remaining = examTimeoutSeconds;
   const timerEl = document.getElementById('exam-timer');
   timerEl.textContent = formatTime(remaining);
   timerEl.className = 'exam-timer';

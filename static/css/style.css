@@ -462,3 +462,30 @@ h1, h2, h3, h4, h5, h6 {
     align-items: flex-start;
   }
 }
+
+.exam-pause-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(255, 255, 255, 0.92);
+  z-index: 1050;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.exam-pause-box {
+  text-align: center;
+  padding: 2rem;
+}
+
+.exam-pause-icon {
+  font-size: 4rem;
+  margin-bottom: 0.5rem;
+}
+
+.exam-pause-text {
+  font-size: 2rem;
+  font-weight: 700;
+  color: var(--text-primary);
+  margin-bottom: 1.5rem;
+}

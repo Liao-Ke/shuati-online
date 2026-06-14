@@ -58,6 +58,7 @@ const api = {
       time_spent_seconds: timeSpent,
     });
   },
+  finishExam(examId) { return this.post(`/exam/${examId}/finish`, {}); },
   getExamResult(examId) { return this.get(`/exam/${examId}/result`); },
 
   getHistory(page = 1) { return this.get(`/history?page=${page}&page_size=20`); },
