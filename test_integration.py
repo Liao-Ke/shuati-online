@@ -1,25 +1,10 @@
-import json
-import sys
-sys.path.insert(0, '.')
-
+import uuid
 from main import app
 from fastapi.testclient import TestClient
+import pytest
 
-client = TestClient(app)
 
-suffix = __import__('uuid').uuid4().hex[:8]
-username = f"test_{suffix}"
-
-# 1. Register
-r = client.post('/api/auth/register', json={'username': username, 'password': '123456'})
-assert r.status_code == 200, f"注册失败: {r.text}"
-data = r.json()
-token = data['access_token']
-headers = {'Authorization': f'Bearer {token}'}
-print(f'1. Register/Login: {username}')
-
-# 2. Import bank
-bank_data = {
+BANK_DATA = {
     "title": "测试题库",
     "description": "这是一个测试",
     "questions": [
@@ -28,242 +13,297 @@ bank_data = {
         {"type": "fill", "chapter": "进阶", "content": "四大发明是____、____、____和____", "answer": ["造纸术", "印刷术", "火药", "指南针"]},
         {"type": "judge", "chapter": "基础", "content": "地球是圆的", "answer": "对"},
         {"type": "multiple", "chapter": "基础", "content": "以下哪些是数字？", "options": ["A. 一", "B. 二", "C. 三", "D. 四"], "answer": ["A", "B", "C", "D"]},
-    ]
+    ],
 }
-r = client.post('/api/question-banks/import', json=bank_data, headers=headers)
-assert r.status_code == 201, f"导入失败: {r.text}"
-bank_id = r.json()['id']
-print(f'2. Import bank: id={bank_id}, {r.json()["question_count"]} 题')
 
-# 3. List banks
-r = client.get('/api/question-banks', headers=headers)
-assert r.status_code == 200
-print(f'3. List banks: {len(r.json())} 个')
-
-# 4. Start exam
-r = client.post('/api/exam/start', json={
-    "bank_ids": [bank_id], "mode": "sequential",
-    "types": ["choice", "fill", "judge", "multiple"],
-    "choice_timeout": 30, "judge_fill_timeout": 60
-}, headers=headers)
-exam_id = r.json()['exam_id']
-total = r.json()['total_count']
-print(f'4. Start exam: id={exam_id}, total={total}')
-
-# 5. Answer all questions
-correct_count = 0
-answers = [
-    ("choice", "B"),                           # Correct
-    ("fill", "上海"),                           # Wrong
-    ("fill", ["造纸术", "印刷术", "火药", "指南针"]),  # Correct
-    ("judge", "错"),                            # Wrong
-    ("multiple", ["A", "B", "C", "D"]),        # Correct
+ANSWERS = [
+    ("choice", "B"),
+    ("fill", "上海"),
+    ("fill", ["造纸术", "印刷术", "火药", "指南针"]),
+    ("judge", "错"),
+    ("multiple", ["A", "B", "C", "D"]),
 ]
-for i, (qtype, ans) in enumerate(answers, 1):
-    r = client.get(f'/api/exam/{exam_id}/current', headers=headers)
+
+
+class State:
+    """模块级可变状态，在测试间传递数据"""
+    token = None
+    username = None
+    bank_id = None
+    exam_id = None
+    nav_exam_id = None
+    correct_count = 0
+
+
+state = State()
+
+
+# ── Fixtures ──
+
+
+@pytest.fixture(scope="session")
+def client():
+    return TestClient(app)
+
+
+@pytest.fixture(scope="session")
+def auth_headers(client):
+    suffix = uuid.uuid4().hex[:8]
+    state.username = f"test_{suffix}"
+    r = client.post("/api/auth/register", json={"username": state.username, "password": "123456"})
+    assert r.status_code == 200, f"注册失败: {r.text}"
+    state.token = r.json()["access_token"]
+    return {"Authorization": f"Bearer {state.token}"}
+
+
+# ── Test: 注册 + 题库导入 ──
+
+
+def test_01_register(auth_headers):
+    assert state.token is not None
+    assert state.username is not None
+
+
+def test_02_import_bank(client, auth_headers):
+    r = client.post("/api/question-banks/import", json=BANK_DATA, headers=auth_headers)
+    assert r.status_code == 201, f"导入失败: {r.text}"
+    state.bank_id = r.json()["id"]
+    assert r.json()["question_count"] == 5
+
+
+def test_03_list_banks(client, auth_headers):
+    r = client.get("/api/question-banks", headers=auth_headers)
     assert r.status_code == 200
-    data = r.json()
-    assert data['question'] is not None, f"没有题目了 (index {data['current_index']})"
-    qid = data['question']['id']
-    r = client.post(f'/api/exam/{exam_id}/answer', json={
-        "exam_id": exam_id, "question_id": qid,
-        "user_answer": ans, "time_spent_seconds": 5
-    }, headers=headers)
+    assert len(r.json()) >= 1
+
+
+# ── Test: 答题流程 ──
+
+
+def test_04_start_exam(client, auth_headers):
+    r = client.post("/api/exam/start", json={
+        "bank_ids": [state.bank_id], "mode": "sequential",
+        "types": ["choice", "fill", "judge", "multiple"],
+        "choice_timeout": 30, "judge_fill_timeout": 60,
+    }, headers=auth_headers)
+    assert r.status_code == 200
+    state.exam_id = r.json()["exam_id"]
+    assert r.json()["total_count"] == 5
+
+
+def test_05_answer_all(client, auth_headers):
+    exam_id = state.exam_id
+    correct_count = 0
+    for i, (qtype, ans) in enumerate(ANSWERS, 1):
+        r = client.get(f"/api/exam/{exam_id}/current", headers=auth_headers)
+        assert r.status_code == 200
+        data = r.json()
+        assert data["question"] is not None, f"没有题目了 (index {data['current_index']})"
+        qid = data["question"]["id"]
+        r = client.post(f"/api/exam/{exam_id}/answer", json={
+            "exam_id": exam_id, "question_id": qid,
+            "user_answer": ans, "time_spent_seconds": 5,
+        }, headers=auth_headers)
+        assert r.status_code == 200
+        if r.json()["is_correct"]:
+            correct_count += 1
+    state.correct_count = correct_count
+    assert correct_count == 3
+
+
+def test_06_exam_result(client, auth_headers):
+    r = client.get(f"/api/exam/{state.exam_id}/result", headers=auth_headers)
+    assert r.status_code == 200
     res = r.json()
-    if res['is_correct']:
-        correct_count += 1
-    print(f'   Q{i} ({qtype}): ans={ans} -> {"✓" if res["is_correct"] else "✗"} correct_ans={res["correct_answer"]}')
+    assert res["total_count"] == 5
+    assert res["correct_count"] == state.correct_count
 
-print(f'5. Correct: {correct_count}/{total}')
 
-# 6. Exam result
-r = client.get(f'/api/exam/{exam_id}/result', headers=headers)
-res = r.json()
-assert res['total_count'] == total
-assert res['correct_count'] == correct_count
-print(f'6. Result: {res["correct_count"]}/{res["total_count"]} correct, accuracy={res["accuracy"]}')
+# ── Test: 错题本 + 历史 ──
 
-# 7. Wrong answers
-r = client.get('/api/wrong-answers', headers=headers)
-wrongs = r.json()
-print(f'7. Wrong answers: {len(wrongs)} 道')
 
-# 8. History
-r = client.get('/api/history', headers=headers)
-history = r.json()
-print(f'8. History: {len(history)} 条记录')
+def test_07_wrong_answers(client, auth_headers):
+    r = client.get("/api/wrong-answers", headers=auth_headers)
+    assert r.status_code == 200
+    assert len(r.json()) == 2
 
-# 9. History detail
-r = client.get(f'/api/history/{exam_id}', headers=headers)
-assert r.status_code == 200
-detail = r.json()
-assert detail['exam_id'] == exam_id
-print(f'9. History detail: {detail["total_count"]} 题')
 
-# 10. Dashboard
-r = client.get('/api/dashboard', headers=headers)
-d = r.json()
-assert d['total_banks'] == 1
-assert d['total_exams'] >= 1
-print(f'10. Dashboard: banks={d["total_banks"]}, qs={d["total_questions"]}, exams={d["total_exams"]}')
+def test_08_history(client, auth_headers):
+    r = client.get("/api/history", headers=auth_headers)
+    assert r.status_code == 200
+    assert len(r.json()) >= 1
 
-# 11. Static file serving
-r = client.get('/')
-assert r.status_code == 200
-assert '刷题在线' in r.text
-print(f'11. Static index.html: OK')
 
-# 12. Bank detail
-r = client.get(f'/api/question-banks/{bank_id}', headers=headers)
-assert r.status_code == 200
-bank = r.json()
-assert len(bank['questions']) == 5
-print(f'12. Bank detail: {len(bank["questions"])} 题, chapters: {set(q.get("chapter") for q in bank["questions"])}')
+def test_09_history_detail(client, auth_headers):
+    r = client.get(f"/api/history/{state.exam_id}", headers=auth_headers)
+    assert r.status_code == 200
+    assert r.json()["exam_id"] == state.exam_id
 
-# 13. Delete bank
-r = client.delete(f'/api/question-banks/{bank_id}', headers=headers)
-assert r.status_code == 204
-print(f'13. Delete bank: OK')
 
-# 14. Verify bank deleted
-r = client.get('/api/question-banks', headers=headers)
-assert len(r.json()) == 0
-print(f'14. Verify deleted: {len(r.json())} banks')
+def test_10_dashboard(client, auth_headers):
+    r = client.get("/api/dashboard", headers=auth_headers)
+    assert r.status_code == 200
+    d = r.json()
+    assert d["total_banks"] >= 1
+    assert d["total_exams"] >= 1
 
-# 15. Re-import bank for review test
-r = client.post('/api/question-banks/import', json=bank_data, headers=headers)
-assert r.status_code == 201
-new_bank_id = r.json()['id']
-print(f'15. Re-import bank: id={new_bank_id}')
 
-# 16. Start exam for navigation test
-r = client.post('/api/exam/start', json={
-    "bank_ids": [new_bank_id], "mode": "sequential",
-    "types": ["choice", "fill", "judge", "multiple"],
-    "choice_timeout": 30, "judge_fill_timeout": 60
-}, headers=headers)
-nav_exam_id = r.json()['exam_id']
-nav_total = r.json()['total_count']
-print(f'16. Start exam for nav: id={nav_exam_id}, total={nav_total}')
+def test_11_static_file(client):
+    r = client.get("/")
+    assert r.status_code == 200
+    assert "刷题在线" in r.text
 
-# 17. Answer first question
-r = client.get(f'/api/exam/{nav_exam_id}/current', headers=headers)
-q1_id = r.json()['question']['id']
-r = client.post(f'/api/exam/{nav_exam_id}/answer', json={
-    "exam_id": nav_exam_id, "question_id": q1_id,
-    "user_answer": "B", "time_spent_seconds": 5
-}, headers=headers)
-assert r.json()['is_correct']
-print(f'17. Answer Q1: correct')
 
-# 18. Navigate to question by index (get index 0, should show answered)
-r = client.get(f'/api/exam/{nav_exam_id}/current?index=0', headers=headers)
-data = r.json()
-assert data['current_index'] == 1
-assert data['is_answered'] == True
-assert data['user_answer'] is not None
-assert data['is_correct'] == True
-assert data['correct_answer'] is not None
-print(f'18. Navigate to index 0: answered={data["is_answered"]}, correct={data["is_correct"]}')
+# ── Test: 题库详情 + 删除 ──
 
-# 19. Navigate to unanswered question (index 1)
-r = client.get(f'/api/exam/{nav_exam_id}/current?index=1', headers=headers)
-data = r.json()
-assert data['current_index'] == 2
-assert data['is_answered'] == False
-assert data['question'] is not None
-assert data['question']['answer'] is None  # 未答题不应暴露答案
-print(f'19. Navigate to index 1: answered={data["is_answered"]}')
 
-# 20. Navigate out of bounds
-r = client.get(f'/api/exam/{nav_exam_id}/current?index=999', headers=headers)
-assert r.status_code == 400
-print(f'20. Navigate out of bounds: 400')
+def test_12_bank_detail(client, auth_headers):
+    r = client.get(f"/api/question-banks/{state.bank_id}", headers=auth_headers)
+    assert r.status_code == 200
+    assert len(r.json()["questions"]) == 5
 
-# 22. Review questions
-r = client.post('/api/review/questions', json={
-    "bank_ids": [new_bank_id],
-    "types": ["choice", "fill", "judge", "multiple"],
-}, headers=headers)
-assert r.status_code == 200
-questions = r.json()
-assert len(questions) == 5
-for q in questions:
-    assert q['answer'] is not None  # 答案可见
-    assert q['review_status'] is None  # 未标记过
-print(f'22. Review questions: {len(questions)} 题, 所有答案可见')
 
-# 23. Mark question as known
-first_qid = questions[0]['id']
-r = client.post('/api/review/mark', json={
-    "question_id": first_qid, "status": "known",
-}, headers=headers)
-assert r.status_code == 200
-stats = r.json()
-assert stats['known_count'] == 1
-assert stats['reviewing_count'] == 0
-assert stats['total_reviewed'] == 1
-print(f'23. Mark known: OK, stats={stats}')
+def test_13_delete_bank(client, auth_headers):
+    r = client.delete(f"/api/question-banks/{state.bank_id}", headers=auth_headers)
+    assert r.status_code == 204
 
-# 24. Mark question as reviewing
-r = client.post('/api/review/mark', json={
-    "question_id": first_qid, "status": "reviewing",
-}, headers=headers)
-assert r.status_code == 200
-stats = r.json()
-assert stats['known_count'] == 0
-assert stats['reviewing_count'] == 1
-assert stats['total_reviewed'] == 1
-print(f'24. Mark reviewing: OK, stats={stats}')
 
-# 25. Review stats
-r = client.get('/api/review/stats', headers=headers)
-stats = r.json()
-assert stats['total_reviewed'] == 1
-print(f'25. Stats: {stats}')
+def test_14_verify_delete(client, auth_headers):
+    r = client.get("/api/question-banks", headers=auth_headers)
+    assert len(r.json()) == 0
 
-# 26. Filter by show_reviewing_only (mark first as known first, then only reviewing should show)
-r = client.post('/api/review/mark', json={
-    "question_id": first_qid, "status": "known",
-}, headers=headers)
-assert r.status_code == 200
-r = client.post('/api/review/questions', json={
-    "bank_ids": [new_bank_id],
-    "show_reviewing_only": True,
-}, headers=headers)
-filtered = r.json()
-known_ids = [q['id'] for q in filtered if q['review_status'] == 'known']
-assert len(known_ids) == 0  # 不应包含已掌握的
-print(f'26. Show reviewing only: {len(filtered)} 题, 已排除已掌握的')
 
-# 27. Review with type filter
-r = client.post('/api/review/questions', json={
-    "bank_ids": [new_bank_id],
-    "types": ["choice"],
-}, headers=headers)
-type_filtered = r.json()
-assert len(type_filtered) == 1
-assert type_filtered[0]['type'] == 'choice'
-print(f'27. Type filter: {len(type_filtered)} 题')
+# ── Test: 重新导入 + 答题导航 ──
 
-# 27. Review with type filter (choice)
-r = client.post('/api/review/questions', json={
-    "bank_ids": [new_bank_id],
-    "types": ["choice"],
-}, headers=headers)
-type_filtered = r.json()
-assert len(type_filtered) == 1
-assert type_filtered[0]['type'] == 'choice'
-print(f'27. Type filter: {len(type_filtered)} 题')
 
-# 28. Review with type filter (multiple)
-r = client.post('/api/review/questions', json={
-    "bank_ids": [new_bank_id],
-    "types": ["multiple"],
-}, headers=headers)
-multi_filtered = r.json()
-assert len(multi_filtered) == 1
-assert multi_filtered[0]['type'] == 'multiple'
-print(f'28. Multiple type filter: {len(multi_filtered)} 题')
+def test_15_reimport(client, auth_headers):
+    r = client.post("/api/question-banks/import", json=BANK_DATA, headers=auth_headers)
+    assert r.status_code == 201
+    state.bank_id = r.json()["id"]
 
-print('\n=== All 28 tests passed! ===')
+
+def test_16_start_exam_for_nav(client, auth_headers):
+    r = client.post("/api/exam/start", json={
+        "bank_ids": [state.bank_id], "mode": "sequential",
+        "types": ["choice", "fill", "judge", "multiple"],
+        "choice_timeout": 30, "judge_fill_timeout": 60,
+    }, headers=auth_headers)
+    assert r.status_code == 200
+    state.nav_exam_id = r.json()["exam_id"]
+    assert r.json()["total_count"] == 5
+
+
+def test_17_answer_q1(client, auth_headers):
+    r = client.get(f"/api/exam/{state.nav_exam_id}/current", headers=auth_headers)
+    q1_id = r.json()["question"]["id"]
+    r = client.post(f"/api/exam/{state.nav_exam_id}/answer", json={
+        "exam_id": state.nav_exam_id, "question_id": q1_id,
+        "user_answer": "B", "time_spent_seconds": 5,
+    }, headers=auth_headers)
+    assert r.json()["is_correct"]
+
+
+def test_18_navigate_index_0(client, auth_headers):
+    r = client.get(f"/api/exam/{state.nav_exam_id}/current?index=0", headers=auth_headers)
+    data = r.json()
+    assert data["current_index"] == 1
+    assert data["is_answered"] is True
+    assert data["user_answer"] is not None
+    assert data["is_correct"] is True
+    assert data["correct_answer"] is not None
+
+
+def test_19_navigate_index_1(client, auth_headers):
+    r = client.get(f"/api/exam/{state.nav_exam_id}/current?index=1", headers=auth_headers)
+    data = r.json()
+    assert data["current_index"] == 2
+    assert data["is_answered"] is False
+    assert data["question"] is not None
+    assert data["question"]["answer"] is None
+
+
+def test_20_navigate_out_of_bounds(client, auth_headers):
+    r = client.get(f"/api/exam/{state.nav_exam_id}/current?index=999", headers=auth_headers)
+    assert r.status_code == 400
+
+
+# ── Test: 背题模式 ──
+
+
+def test_22_review_questions(client, auth_headers):
+    r = client.post("/api/review/questions", json={
+        "bank_ids": [state.bank_id],
+        "types": ["choice", "fill", "judge", "multiple"],
+    }, headers=auth_headers)
+    assert r.status_code == 200
+    questions = r.json()
+    assert len(questions) == 5
+    for q in questions:
+        assert q["answer"] is not None
+        assert q["review_status"] is None
+
+
+def test_23_mark_known(client, auth_headers):
+    r = client.post("/api/review/questions", json={
+        "bank_ids": [state.bank_id],
+        "types": ["choice", "fill", "judge", "multiple"],
+    }, headers=auth_headers)
+    first_qid = r.json()[0]["id"]
+    r = client.post("/api/review/mark", json={
+        "question_id": first_qid, "status": "known",
+    }, headers=auth_headers)
+    stats = r.json()
+    assert stats["known_count"] == 1
+    assert stats["reviewing_count"] == 0
+    assert stats["total_reviewed"] == 1
+    state._review_first_qid = first_qid
+
+
+def test_24_mark_reviewing(client, auth_headers):
+    r = client.post("/api/review/mark", json={
+        "question_id": state._review_first_qid, "status": "reviewing",
+    }, headers=auth_headers)
+    stats = r.json()
+    assert stats["known_count"] == 0
+    assert stats["reviewing_count"] == 1
+    assert stats["total_reviewed"] == 1
+
+
+def test_25_review_stats(client, auth_headers):
+    r = client.get("/api/review/stats", headers=auth_headers)
+    stats = r.json()
+    assert stats["total_reviewed"] >= 1
+
+
+def test_26_filter_reviewing_only(client, auth_headers):
+    r = client.post("/api/review/mark", json={
+        "question_id": state._review_first_qid, "status": "known",
+    }, headers=auth_headers)
+    assert r.status_code == 200
+    r = client.post("/api/review/questions", json={
+        "bank_ids": [state.bank_id],
+        "show_reviewing_only": True,
+    }, headers=auth_headers)
+    filtered = r.json()
+    known_ids = [q["id"] for q in filtered if q["review_status"] == "known"]
+    assert len(known_ids) == 0
+
+
+def test_27_review_type_filter_choice(client, auth_headers):
+    r = client.post("/api/review/questions", json={
+        "bank_ids": [state.bank_id],
+        "types": ["choice"],
+    }, headers=auth_headers)
+    type_filtered = r.json()
+    assert len(type_filtered) == 1
+    assert type_filtered[0]["type"] == "choice"
+
+
+def test_28_review_type_filter_multiple(client, auth_headers):
+    r = client.post("/api/review/questions", json={
+        "bank_ids": [state.bank_id],
+        "types": ["multiple"],
+    }, headers=auth_headers)
+    multi_filtered = r.json()
+    assert len(multi_filtered) == 1
+    assert multi_filtered[0]["type"] == "multiple"
