@@ -851,6 +851,9 @@ footer.foot {
         <figure class="gallery-panel" data-title="数据总览" data-line="题库数、练习次数、正确率，一眼看完">
           <img src="screenshots/02-dashboard.png" alt="仪表盘界面">
         </figure>
+        <figure class="gallery-panel" data-title="题库管理" data-line="导入、增删改、导出，题库全生命周期管理">
+          <img src="screenshots/03-banks.png" alt="题库管理界面">
+        </figure>
         <figure class="gallery-panel" data-title="答题配置" data-line="题库·模式·题量·题型·计时，开答前选好就行">
           <img src="screenshots/04-exam-setup.png" alt="答题设置界面">
         </figure>
@@ -860,8 +863,14 @@ footer.foot {
         <figure class="gallery-panel" data-title="结果复盘" data-line="正确率、用时、每道题的回看，一次练习一次迭代">
           <img src="screenshots/10-result.png" alt="答题结果界面">
         </figure>
+        <figure class="gallery-panel" data-title="练习历史" data-line="每次练习自动存档，逐题回顾，追踪进步轨迹">
+          <img src="screenshots/09-history.png" alt="练习历史界面">
+        </figure>
         <figure class="gallery-panel" data-title="背题模式" data-line="题目与答案一并展示，快速过完整个题库">
           <img src="screenshots/08-review.png" alt="背题模式界面">
+        </figure>
+        <figure class="gallery-panel" data-title="答错总结" data-line="答错自动收集，按题库分组，针对性补强">
+          <img src="screenshots/11-wrong-answers.png" alt="错题本界面">
         </figure>
       </div>
       <div class="gallery-caption">
@@ -870,10 +879,13 @@ footer.foot {
       </div>
       <div class="gallery-tabs" aria-label="选择截图">
         <button aria-pressed="true">总览</button>
+        <button aria-pressed="false">题库</button>
         <button aria-pressed="false">配置</button>
         <button aria-pressed="false">答题</button>
         <button aria-pressed="false">结果</button>
+        <button aria-pressed="false">历史</button>
         <button aria-pressed="false">背题</button>
+        <button aria-pressed="false">错题</button>
       </div>
     </div>
   </section>
@@ -887,16 +899,16 @@ footer.foot {
 
     <ol class="features">
       <li>
-        <p class="name">题库管理<small>导入即用</small></p>
-        <p class="what">支持 JSON 格式批量导入，一次导入整个题库。多文件同时上传，章节自动归类。内置示例 JSON，格式一看就懂。</p>
+        <p class="name">题库管理<small>全生命周期</small></p>
+        <p class="what">JSON 导入导出，多题库同步导入，部分失败不影响其他。已导入的题库支持逐题增删改、按题型和章节筛选。内置示例 JSON，格式一看就懂。</p>
       </li>
       <li>
         <p class="name">答题练习<small>模式任选</small></p>
-        <p class="what">顺序模式按章节逐题推进，随机模式打乱出题顺序。单题视图聚焦当前题目，整卷预览一览全局。支持多题库组合练习。</p>
+        <p class="what">顺序或随机模式，题号侧边栏快速跳转。自定义题目数量，按题型筛选（单选/多选/填空/判断）。单题视图或整卷预览，多题库组合练习，支持提前交卷。</p>
       </li>
       <li>
-        <p class="name">背题模式<small>一次过完</small></p>
-        <p class="what">直接展示题目与答案，逐题标记"记住了"或"待复习"。适合考前突击或首次熟悉题库内容，效率远高于逐题作答。</p>
+        <p class="name">背题模式<small>快速过完</small></p>
+        <p class="what">直接展示题目与答案，逐题标记"记住了"或"待复习"。支持按章节精确筛选、只看待复习题目。适合考前突击或首次熟悉题库内容，效率远高于逐题作答。</p>
       </li>
       <li>
         <p class="name">计时系统<small>节奏自控</small></p>
@@ -909,6 +921,10 @@ footer.foot {
       <li>
         <p class="name">练习历史<small>可回溯</small></p>
         <p class="what">每次练习自动存档，分页列表清晰呈现。点击即可查看逐题回顾——你的答案、正确答案、解析，全部可查。方便追踪进步轨迹。</p>
+      </li>
+      <li>
+        <p class="name">数据总览<small>一目了然</small></p>
+        <p class="what">注册后进入仪表盘，总题库数、总题数、练习次数、平均正确率一览无余。最近练习记录展示进步趋势，学习节奏尽在掌握。</p>
       </li>
     </ol>
   </section>
@@ -998,7 +1014,7 @@ footer.foot {
       </div>
       <div class="faq-pair">
         <dt>支持哪些题型？</dt>
-        <dd>目前支持选择题（四选一）、填空题（文本输入）、判断题（对/错）。每种题型都有独立的计时配置和批改逻辑。</dd>
+        <dd>目前支持单选题（四选一）、多选题、填空题（文本输入）、判断题（对/错）。每种题型都有独立的计时配置和批改逻辑。</dd>
       </div>
       <div class="faq-pair">
         <dt>需要什么技术背景才能部署？</dt>
