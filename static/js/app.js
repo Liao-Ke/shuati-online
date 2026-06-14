@@ -1110,7 +1110,7 @@ async function doImport() {
     if (allOk) {
       setTimeout(() => {
         bootstrap.Modal.getInstance(document.getElementById('importModal')).hide();
-        router.navigate('/banks');
+        router.resolve();
       }, 800);
     } else {
       btn.disabled = false; btn.innerHTML = '确认导入（仅导入成功的）';
