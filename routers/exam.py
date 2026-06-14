@@ -1,0 +1,203 @@
+import json
+import random
+from fastapi import APIRouter, Depends, HTTPException
+from sqlalchemy.orm import Session
+from database import get_db
+from models import User, QuestionBank, Question, ExamRecord, AnswerRecord
+from schemas import ExamStart, ExamCurrent, QuestionOut, AnswerSubmit, AnswerResult, ExamResult
+from auth import get_current_user
+
+router = APIRouter(prefix="/api/exam", tags=["答题"])
+
+
+def _serialize_question(q: Question, hide_answer: bool = True) -> QuestionOut:
+    return QuestionOut(
+        id=q.id, type=q.type, chapter=q.chapter, content=q.content,
+        options=q.options,
+        answer=None if hide_answer else q.answer,
+        analysis=None if hide_answer else q.analysis,
+        sort_order=q.sort_order,
+    )
+
+
+def _load_exam_questions(exam: ExamRecord, db: Session) -> tuple[list[Question], list[AnswerRecord]]:
+    bank_ids = json.loads(exam.bank_ids)
+    banks = db.query(QuestionBank).filter(QuestionBank.id.in_(bank_ids)).all()
+    all_questions = []
+    for bank in banks:
+        all_questions.extend(bank.questions)
+
+    if exam.mode == "random":
+        random.seed(exam.id)
+        random.shuffle(all_questions)
+    else:
+        all_questions.sort(key=lambda q: (q.bank_id or 0, q.sort_order or 0, q.id or 0))
+
+    answered = db.query(AnswerRecord).filter(AnswerRecord.exam_id == exam.id).all()
+    answered_ids = {a.question_id for a in answered}
+    remaining = [q for q in all_questions if q.id not in answered_ids]
+    return remaining, answered
+
+
+@router.post("/start")
+def start_exam(data: ExamStart, user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+    banks = db.query(QuestionBank).filter(
+        QuestionBank.id.in_(data.bank_ids),
+        QuestionBank.user_id == user.id,
+    ).all()
+    if not banks:
+        raise HTTPException(status_code=400, detail="题库不存在")
+    questions = []
+    for bank in banks:
+        for q in bank.questions:
+            if data.types and q.type not in data.types:
+                continue
+            questions.append(q)
+    if not questions:
+        raise HTTPException(status_code=400, detail="没有符合条件的题目")
+
+    exam = ExamRecord(
+        user_id=user.id,
+        bank_ids=json.dumps(data.bank_ids),
+        mode=data.mode,
+        question_count=len(questions),
+        status="in_progress",
+    )
+    db.add(exam)
+    db.commit()
+    db.refresh(exam)
+
+    return {"exam_id": exam.id, "total_count": len(questions)}
+
+
+@router.get("/{exam_id}/current")
+def current_question(exam_id: int, user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+    exam = db.query(ExamRecord).filter(
+        ExamRecord.id == exam_id, ExamRecord.user_id == user.id
+    ).first()
+    if not exam:
+        raise HTTPException(status_code=404, detail="练习记录不存在")
+
+    remaining, answered = _load_exam_questions(exam, db)
+
+    if not remaining:
+        return ExamCurrent(exam_id=exam.id, current_index=len(answered), total_count=exam.question_count, question=None)
+
+    q = remaining[0]
+    q_out = _serialize_question(q, hide_answer=True)
+    return ExamCurrent(
+        exam_id=exam.id, current_index=len(answered) + 1,
+        total_count=exam.question_count, question=q_out,
+    )
+
+
+@router.post("/{exam_id}/answer", response_model=AnswerResult)
+def submit_answer(data: AnswerSubmit, user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+    exam = db.query(ExamRecord).filter(
+        ExamRecord.id == data.exam_id, ExamRecord.user_id == user.id
+    ).first()
+    if not exam:
+        raise HTTPException(status_code=404, detail="练习不存在")
+
+    question = db.query(Question).filter(Question.id == data.question_id).first()
+    if not question:
+        raise HTTPException(status_code=404, detail="题目不存在")
+
+    correct_answer = json.loads(question.answer) if question.answer and question.answer.startswith("[") else question.answer
+
+    if question.type == "choice":
+        is_correct = data.user_answer == correct_answer
+    elif question.type == "judge":
+        is_correct = data.user_answer == correct_answer
+    elif question.type == "fill":
+        if isinstance(correct_answer, list):
+            user_list = data.user_answer if isinstance(data.user_answer, list) else [data.user_answer]
+            is_correct = len(user_list) == len(correct_answer) and all(
+                (u or "").strip() == (c or "").strip() for u, c in zip(user_list, correct_answer)
+            )
+        else:
+            is_correct = (data.user_answer or "").strip() == (correct_answer or "").strip()
+    else:
+        is_correct = False
+
+    user_answer_str = json.dumps(data.user_answer, ensure_ascii=False) if isinstance(data.user_answer, list) else (data.user_answer or "")
+    record = AnswerRecord(
+        exam_id=exam.id, question_id=question.id,
+        user_answer=user_answer_str, is_correct=is_correct,
+        time_spent_seconds=data.time_spent_seconds,
+    )
+    db.add(record)
+    if is_correct:
+        exam.correct_count += 1
+    else:
+        exam.wrong_count += 1
+    exam.duration_seconds = max(exam.duration_seconds or 0, record.time_spent_seconds)
+    db.commit()
+
+    remaining, answered = _load_exam_questions(exam, db)
+    is_last = len(remaining) == 0
+
+    if is_last:
+        exam.status = "completed"
+        exam.finished_at = __import__("datetime").datetime.utcnow()
+        db.commit()
+
+    correct_display = correct_answer
+    if isinstance(correct_answer, list):
+        correct_display = correct_answer
+
+    return AnswerResult(
+        is_correct=is_correct,
+        correct_answer=correct_display,
+        analysis=question.analysis,
+        next_index=None if is_last else len(answered),
+        is_last=is_last,
+    )
+
+
+@router.get("/{exam_id}/result", response_model=ExamResult)
+def exam_result(exam_id: int, user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+    exam = db.query(ExamRecord).filter(
+        ExamRecord.id == exam_id, ExamRecord.user_id == user.id
+    ).first()
+    if not exam:
+        raise HTTPException(status_code=404, detail="练习不存在")
+
+    answers = db.query(AnswerRecord).filter(
+        AnswerRecord.exam_id == exam.id
+    ).order_by(AnswerRecord.id).all()
+
+    result_answers = []
+    for a in answers:
+        q = db.query(Question).filter(Question.id == a.question_id).first()
+        if not q:
+            continue
+        correct_answer = json.loads(q.answer) if q.answer and q.answer.startswith("[") else q.answer
+        user_answer_raw = a.user_answer
+        try:
+            user_answer = json.loads(user_answer_raw) if (user_answer_raw or "").startswith("[") else user_answer_raw
+        except (json.JSONDecodeError, TypeError):
+            user_answer = user_answer_raw
+        result_answers.append({
+            "question_id": q.id,
+            "type": q.type,
+            "content": q.content,
+            "options": json.loads(q.options) if q.options else None,
+            "correct_answer": correct_answer,
+            "user_answer": user_answer,
+            "is_correct": a.is_correct,
+            "time_spent": a.time_spent_seconds,
+            "analysis": q.analysis,
+        })
+
+    total = exam.correct_count + exam.wrong_count
+    accuracy = round(exam.correct_count / total, 4) if total > 0 else 0
+    return ExamResult(
+        exam_id=exam.id,
+        total_count=total,
+        correct_count=exam.correct_count,
+        wrong_count=exam.wrong_count,
+        accuracy=accuracy,
+        duration_seconds=exam.duration_seconds or 0,
+        answers=result_answers,
+    )
