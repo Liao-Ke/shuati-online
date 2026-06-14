@@ -192,6 +192,14 @@ h1, h2, h3, h4, h5, h6 {
   transition: color 0.3s;
 }
 
+.exam-elapsed {
+  font-family: 'Poppins', sans-serif;
+  font-size: 0.9rem;
+  font-weight: 600;
+  color: var(--text-muted);
+  white-space: nowrap;
+}
+
 .timer-warning {
   color: var(--warning) !important;
   animation: pulse 1s infinite;
@@ -474,6 +482,22 @@ h1, h2, h3, h4, h5, h6 {
   .exam-layout-preview .exam-sidebar-header {
     display: none;
   }
+}
+
+.exam-layout-preview .exam-header .d-flex:first-child {
+  justify-content: center;
+  gap: 0.75rem;
+}
+
+.exam-layout-preview .exam-header {
+  position: sticky;
+  top: 80px;
+  z-index: 10;
+  background: rgba(239, 246, 255, 0.85);
+  backdrop-filter: blur(8px);
+  -webkit-backdrop-filter: blur(8px);
+  padding: 0.5rem 0.75rem;
+  border-radius: 8px;
 }
 
 .review-option {

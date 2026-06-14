@@ -76,6 +76,7 @@ class ExamStart(BaseModel):
     mode: str
     types: Optional[List[str]] = None
     question_count: Optional[int] = None
+    timer_mode: str = "per_question"
     choice_timeout: int = 30
     judge_fill_timeout: int = 60
 

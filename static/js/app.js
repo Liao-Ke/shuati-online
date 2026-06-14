@@ -47,6 +47,9 @@ let examPaused = false;
 let examPauseRemaining = 0;
 let examFullPreview = false;
 let examScrollTimer = null;
+let examTimerMode = 'per_question';
+let examStartedAt = null;
+let examElapsedInterval = null;
 
 async function checkAuth() {
   if (!api.token) return false;
@@ -350,8 +353,12 @@ router.add('/exam/setup', async () => {
         </div>
       </div></div>
       <div class="card mb-4"><div class="card-body">
-        <h5>单题计时</h5>
-        <div class="row g-3 mt-1">
+        <h5>计时方式</h5>
+        <div class="d-flex gap-3 mt-2">
+          <div class="mode-card active" data-timer="per_question" onclick="selectTimerMode(this)">单题计时 <small class="d-block text-muted">每题限时作答</small></div>
+          <div class="mode-card" data-timer="elapsed" onclick="selectTimerMode(this)">整卷计时 <small class="d-block text-muted">记录总用时，不限时作答</small></div>
+        </div>
+        <div class="row g-3 mt-2" id="per-question-timeouts">
           <div class="col-auto"><label class="form-label">选择题</label><input type="number" class="form-control" id="timeout-choice" value="30" min="10" max="300"></div>
           <div class="col-auto"><label class="form-label">填空/判断</label><input type="number" class="form-control" id="timeout-fill" value="60" min="10" max="300"></div>
         </div>
@@ -401,6 +408,7 @@ router.add('/exam', async () => {
               <button class="btn btn-outline-danger btn-sm" id="finish-btn" onclick="finishExam()">✕ 结束</button>
             </div>
             <span id="exam-timer" class="exam-timer">0:00</span>
+            <span id="exam-elapsed" class="exam-elapsed d-none">总 0:00</span>
           </div>
           <div class="progress exam-progress"><div id="exam-progress-bar" class="progress-bar" style="width:0%"></div></div>
           <div class="d-flex justify-content-between align-items-center mt-2">
@@ -437,6 +445,10 @@ router.add('/exam', async () => {
   if (savedIdx) examCurrentIndex = parseInt(savedIdx);
   const savedMode = sessionStorage.getItem('examMode');
   if (savedMode) examFullPreview = savedMode === 'preview';
+  examTimerMode = sessionStorage.getItem('examTimerMode') || 'per_question';
+  const savedStarted = sessionStorage.getItem('examStartedAt');
+  if (savedStarted) examStartedAt = savedStarted;
+  if (examTimerMode === 'elapsed') startElapsedTimer();
   examProgress = await api.getExamProgress(examId);
   renderQuestionGrid();
   if (examFullPreview) {
@@ -444,7 +456,7 @@ router.add('/exam', async () => {
     document.getElementById('prev-btn').style.display = 'none';
     document.getElementById('next-btn').style.display = 'none';
     document.getElementById('exam-nav-hint').style.display = 'none';
-    document.getElementById('exam-timer').style.display = 'none';
+    if (examTimerMode === 'per_question') document.getElementById('exam-timer').style.display = 'none';
     document.querySelector('.exam-progress').style.display = 'none';
     document.getElementById('exam-progress-text').textContent = '整卷模式';
     document.querySelector('.exam-layout')?.classList.add('exam-layout-preview');
@@ -470,10 +482,13 @@ function examKeyHandler(e) {
 }
 
 router.add('/result/:id', async ({ id }) => {
+  if (examElapsedInterval) clearInterval(examElapsedInterval);
   window.removeEventListener('scroll', trackPreviewScroll);
   sessionStorage.removeItem('activeExamId');
   sessionStorage.removeItem('examCurrentIndex');
   sessionStorage.removeItem('examMode');
+  sessionStorage.removeItem('examTimerMode');
+  sessionStorage.removeItem('examStartedAt');
   showNav();
   render('<div class="text-center py-5"><div class="spinner-border"></div></div>');
   try {
@@ -906,6 +921,13 @@ function selectMode(el) {
   el.classList.add('active');
 }
 
+function selectTimerMode(el) {
+  $$('[data-timer]').forEach(c => c.classList.remove('active'));
+  el.classList.add('active');
+  const mode = el.dataset.timer;
+  document.getElementById('per-question-timeouts').style.display = mode === 'per_question' ? '' : 'none';
+}
+
 function toggleBankSelect(el) {
   const cb = el.querySelector('.bank-checkbox');
   cb.checked = !cb.checked;
@@ -922,13 +944,18 @@ async function startExam() {
   const types = [...document.querySelectorAll('.type-filter:checked')].map(cb => cb.value);
   const allQuestions = document.getElementById('question-count-all').checked;
   const questionCount = allQuestions ? null : parseInt(document.getElementById('question-count-input').value) || null;
+  const timerMode = document.querySelector('[data-timer].active')?.dataset.timer || 'per_question';
   const choiceTimeout = parseInt(document.getElementById('timeout-choice').value) || 30;
   const fillTimeout = parseInt(document.getElementById('timeout-fill').value) || 60;
   try {
-    const res = await api.startExam({ bank_ids: selectedBanks, mode, types, question_count: questionCount, choice_timeout: choiceTimeout, judge_fill_timeout: fillTimeout });
+    const res = await api.startExam({ bank_ids: selectedBanks, mode, types, question_count: questionCount, timer_mode: timerMode, choice_timeout: choiceTimeout, judge_fill_timeout: fillTimeout });
     examId = res.exam_id;
     examTotalCount = res.total_count;
+    examTimerMode = res.timer_mode;
+    examStartedAt = res.started_at;
     sessionStorage.setItem('activeExamId', examId);
+    sessionStorage.setItem('examTimerMode', examTimerMode);
+    sessionStorage.setItem('examStartedAt', examStartedAt);
     router.navigate('/exam');
   } catch (err) {
     alert(err.message);
@@ -1112,12 +1139,15 @@ async function finishExam() {
   if (!confirm('确定要提前结束吗？未答的题目将不计入成绩。')) return;
   if (examPaused) resumeExam();
   clearInterval(examTimerInterval);
+  if (examElapsedInterval) clearInterval(examElapsedInterval);
   try {
     await api.finishExam(examId);
     window.removeEventListener('scroll', trackPreviewScroll);
     sessionStorage.removeItem('activeExamId');
     sessionStorage.removeItem('examCurrentIndex');
     sessionStorage.removeItem('examMode');
+    sessionStorage.removeItem('examTimerMode');
+    sessionStorage.removeItem('examStartedAt');
     document.removeEventListener('keydown', examKeyHandler);
     router.navigate(`/result/${examId}`);
   } catch (err) {
@@ -1148,6 +1178,21 @@ function trackPreviewScroll() {
   }, 150);
 }
 
+function startElapsedTimer() {
+  if (examElapsedInterval) clearInterval(examElapsedInterval);
+  const start = examStartedAt ? new Date(examStartedAt).getTime() : Date.now();
+  const update = () => {
+    const elapsed = Math.floor((Date.now() - start) / 1000);
+    const el = document.getElementById('exam-elapsed');
+    if (el) {
+      el.textContent = '总 ' + formatTime(elapsed);
+      el.classList.remove('d-none');
+    }
+  };
+  update();
+  examElapsedInterval = setInterval(update, 1000);
+}
+
 async function toggleExamMode() {
   examFullPreview = !examFullPreview;
   sessionStorage.setItem('examMode', examFullPreview ? 'preview' : 'single');
@@ -1158,7 +1203,7 @@ async function toggleExamMode() {
     document.getElementById('prev-btn').style.display = 'none';
     document.getElementById('next-btn').style.display = 'none';
     document.getElementById('exam-nav-hint').style.display = 'none';
-    document.getElementById('exam-timer').style.display = 'none';
+    if (examTimerMode === 'per_question') document.getElementById('exam-timer').style.display = 'none';
     document.querySelector('.exam-progress').style.display = 'none';
     document.getElementById('exam-progress-text').textContent = '整卷模式';
     await renderFullPreview();
@@ -1178,6 +1223,7 @@ async function toggleExamMode() {
     document.getElementById('exam-timer').style.display = '';
     document.querySelector('.exam-progress').style.display = '';
     document.getElementById('exam-progress-text').textContent = `第 ${examCurrentIndex + 1}/${examTotalCount} 题`;
+    if (examTimerMode === 'elapsed' && !examElapsedInterval) startElapsedTimer();
     loadQuestionByIndex(examCurrentIndex);
   }
 }
@@ -1605,6 +1651,8 @@ async function init() {
   if (savedMode) examFullPreview = savedMode === 'preview';
   const savedIdx = sessionStorage.getItem('examCurrentIndex');
   if (savedIdx) examCurrentIndex = parseInt(savedIdx);
+  examTimerMode = sessionStorage.getItem('examTimerMode') || 'per_question';
+  examStartedAt = sessionStorage.getItem('examStartedAt') || null;
   const authed = await checkAuth();
   if (!authed && !location.hash.match(/^\#\/(login|register)$/)) {
     router.navigate('/login');

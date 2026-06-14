@@ -62,6 +62,7 @@ class ExamRecord(Base):
     wrong_count = Column(Integer, default=0)
     duration_seconds = Column(Integer, default=0)
     status = Column(String(15), default="in_progress")
+    timer_mode = Column(String(15), default="per_question")
     started_at = Column(DateTime, default=datetime.datetime.utcnow)
     finished_at = Column(DateTime, nullable=True)
 

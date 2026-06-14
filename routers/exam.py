@@ -80,13 +80,14 @@ def start_exam(data: ExamStart, user: User = Depends(get_current_user), db: Sess
         mode=data.mode,
         question_count=len(selected),
         question_ids=json.dumps(question_ids) if question_ids else None,
+        timer_mode=data.timer_mode,
         status="in_progress",
     )
     db.add(exam)
     db.commit()
     db.refresh(exam)
 
-    return {"exam_id": exam.id, "total_count": len(selected)}
+    return {"exam_id": exam.id, "total_count": len(selected), "timer_mode": data.timer_mode, "started_at": exam.started_at.isoformat()}
 
 
 @router.get("/{exam_id}/current")
