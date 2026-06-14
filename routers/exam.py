@@ -195,6 +195,11 @@ def submit_answer(data: AnswerSubmit, user: User = Depends(get_current_user), db
             )
         else:
             is_correct = (data.user_answer or "").strip() == (correct_answer or "").strip()
+    elif question.type == "multiple":
+        if isinstance(correct_answer, list) and isinstance(data.user_answer, list):
+            is_correct = sorted(correct_answer) == sorted(data.user_answer)
+        else:
+            is_correct = False
     else:
         is_correct = False
 

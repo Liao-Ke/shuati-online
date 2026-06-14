@@ -8,7 +8,7 @@ from auth import get_current_user
 
 router = APIRouter(prefix="/api/question-banks", tags=["题库"])
 
-VALID_TYPES = {"choice", "fill", "judge"}
+VALID_TYPES = {"choice", "fill", "judge", "multiple"}
 VALID_JUDGE_ANSWERS = {"对", "错"}
 
 
@@ -21,7 +21,7 @@ def validate_bank_import(data: BankImport) -> list[str]:
     for i, q in enumerate(data.questions):
         prefix = f"第{i + 1}题"
         if q.type not in VALID_TYPES:
-            errors.append(f"{prefix}: 题型必须为 choice/fill/judge，得到 '{q.type}'")
+            errors.append(f"{prefix}: 题型必须为 choice/fill/judge/multiple，得到 '{q.type}'")
             continue
         if not q.content or not q.content.strip():
             errors.append(f"{prefix}: 题目内容不能为空")
@@ -39,6 +39,11 @@ def validate_bank_import(data: BankImport) -> list[str]:
         elif q.type == "judge":
             if q.answer not in VALID_JUDGE_ANSWERS:
                 errors.append(f"{prefix}(判断题): 答案必须为'对'或'错'，得到 '{q.answer}'")
+        elif q.type == "multiple":
+            if not q.options or len(q.options) < 2:
+                errors.append(f"{prefix}(多选题): 至少需要 2 个选项")
+            if not isinstance(q.answer, list) or len(q.answer) < 1:
+                errors.append(f"{prefix}(多选题): 答案必须为非空数组（如 ['A', 'C']）")
     return errors
 
 

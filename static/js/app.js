@@ -39,6 +39,7 @@ const $$ = (sel) => document.querySelectorAll(sel);
 let examId = null;
 let examTotalCount = 0;
 let selectedAnswer = null;
+let selectedMultiAnswers = [];
 let examTimerInterval = null;
 let examTimeoutSeconds = 30;
 let examCurrentIndex = 0;
@@ -287,7 +288,7 @@ router.add('/banks/:id', async ({ id }) => {
     for (const [ch, qs] of Object.entries(chapters)) {
       let html = `<h5 class="mt-3 mb-2">${escHtml(ch)} (${qs.length} 题)</h5>`;
       qs.forEach(q => {
-        const typeMap = { choice: '选择', fill: '填空', judge: '判断' };
+        const typeMap = { choice: '选择', multiple: '多选', fill: '填空', judge: '判断' };
         html += `<div class="question-item">
           <span class="badge bg-secondary me-2">${typeMap[q.type] || q.type}</span>
           ${escHtml(q.content)}
@@ -331,6 +332,7 @@ router.add('/exam/setup', async () => {
         <h5>题型筛选</h5>
         <div class="d-flex gap-3 mt-2">
           <label><input type="checkbox" class="form-check-input me-1 type-filter" value="choice" checked> 选择题</label>
+          <label><input type="checkbox" class="form-check-input me-1 type-filter" value="multiple" checked> 多选题</label>
           <label><input type="checkbox" class="form-check-input me-1 type-filter" value="fill" checked> 填空题</label>
           <label><input type="checkbox" class="form-check-input me-1 type-filter" value="judge" checked> 判断题</label>
         </div>
@@ -360,6 +362,7 @@ router.add('/exam/setup', async () => {
         </div>
         <div class="row g-3 mt-2" id="per-question-timeouts">
           <div class="col-auto"><label class="form-label">选择题</label><input type="number" class="form-control" id="timeout-choice" value="30" min="10" max="300"></div>
+          <div class="col-auto"><label class="form-label">多选题</label><input type="number" class="form-control" id="timeout-multi" value="45" min="10" max="300"></div>
           <div class="col-auto"><label class="form-label">填空/判断</label><input type="number" class="form-control" id="timeout-fill" value="60" min="10" max="300"></div>
         </div>
       </div></div>
@@ -681,6 +684,7 @@ router.add('/review/setup', async () => {
         <h5>题型筛选</h5>
         <div class="d-flex gap-3 mt-2">
           <label><input type="checkbox" class="form-check-input me-1 review-type-filter" value="choice" checked> 选择题</label>
+          <label><input type="checkbox" class="form-check-input me-1 review-type-filter" value="multiple" checked> 多选题</label>
           <label><input type="checkbox" class="form-check-input me-1 review-type-filter" value="fill" checked> 填空题</label>
           <label><input type="checkbox" class="form-check-input me-1 review-type-filter" value="judge" checked> 判断题</label>
         </div>
@@ -784,7 +788,7 @@ function renderReviewPage() {
     </div>
   `;
   reviewQuestions.forEach((q, i) => {
-    const typeMap = { choice: '选择', fill: '填空', judge: '判断' };
+    const typeMap = { choice: '选择', multiple: '多选', fill: '填空', judge: '判断' };
     const isKnown = q.review_status === 'known';
     const statusBadge = isKnown
       ? '<span class="badge bg-success">已掌握</span>'
@@ -796,6 +800,16 @@ function renderReviewPage() {
         const labels = 'ABCDEFGH';
         opts.forEach((opt, i) => {
           const cls = labels[i] === q.answer ? 'review-option review-option-correct' : 'review-option';
+          optionsHtml += `<div class="${cls}">${labels[i]}. ${escHtml(opt)}</div>`;
+        });
+      } catch { /* ignore */ }
+    } else if (q.type === 'multiple' && q.options) {
+      try {
+        const opts = JSON.parse(q.options);
+        const labels = 'ABCDEFGH';
+        const correctArr = JSON.parse(q.answer);
+        opts.forEach((opt, i) => {
+          const cls = correctArr.includes(labels[i]) ? 'review-option review-option-correct' : 'review-option';
           optionsHtml += `<div class="${cls}">${labels[i]}. ${escHtml(opt)}</div>`;
         });
       } catch { /* ignore */ }
@@ -905,13 +919,13 @@ function logout() {
 function renderOptions(options, userAnswer, correctAnswer) {
   if (!options || options.length === 0) return '';
   const labels = 'ABCDEFGH';
-  const ua = String(userAnswer || '');
-  const ca = String(correctAnswer || '');
+  const ua = Array.isArray(userAnswer) ? userAnswer : [String(userAnswer || '')];
+  const ca = Array.isArray(correctAnswer) ? correctAnswer : [String(correctAnswer || '')];
   return '<div class="history-options">' + options.map((opt, i) => {
     const letter = labels[i];
     let cls = 'history-option';
-    if (letter === ca) cls += ' option-correct';
-    else if (letter === ua) cls += ' option-wrong';
+    if (ca.includes(letter)) cls += ' option-correct';
+    else if (ua.includes(letter)) cls += ' option-wrong';
     return `<div class="${cls}">${letter}. ${escHtml(opt)}</div>`;
   }).join('') + '</div>';
 }
@@ -1025,7 +1039,7 @@ async function loadQuestionByIndex(index) {
     document.getElementById('exam-progress-bar').style.width = `${((index + 1) / data.total_count) * 100}%`;
     updateNavButtons(index, data.total_count);
 
-    const typeMap = { choice: '选择题', fill: '填空题', judge: '判断题' };
+    const typeMap = { choice: '选择题', multiple: '多选题', fill: '填空题', judge: '判断题' };
     const q = data.question;
 
     if (data.is_answered) {
@@ -1051,7 +1065,12 @@ async function loadQuestionByIndex(index) {
     }
 
     const isChoice = q.type === 'choice';
-    examTimeoutSeconds = isChoice ? (parseInt(document.getElementById('timeout-choice')?.value) || 30) : (parseInt(document.getElementById('timeout-fill')?.value) || 60);
+    const isMultiple = q.type === 'multiple';
+    examTimeoutSeconds = isChoice
+      ? (parseInt(document.getElementById('timeout-choice')?.value) || 30)
+      : (isMultiple
+        ? (parseInt(document.getElementById('timeout-multi')?.value) || 45)
+        : (parseInt(document.getElementById('timeout-fill')?.value) || 60));
     state.questionStartTime = Date.now();
 
     let optionsHtml = '';
@@ -1060,6 +1079,12 @@ async function loadQuestionByIndex(index) {
       opts.forEach((opt, i) => {
         const letter = String.fromCharCode(65 + i);
         optionsHtml += `<div class="choice-option" onclick="selectChoice(this, '${letter}')">${escHtml(opt)}</div>`;
+      });
+    } else if (q.type === 'multiple') {
+      const opts = JSON.parse(q.options || '[]');
+      opts.forEach((opt, i) => {
+        const letter = String.fromCharCode(65 + i);
+        optionsHtml += `<div class="choice-option" onclick="toggleMultiChoice(this, '${letter}')">${escHtml(opt)}</div>`;
       });
     } else if (q.type === 'judge') {
       optionsHtml = `
@@ -1101,6 +1126,9 @@ async function loadQuestionByIndex(index) {
 
     if (q.type === 'fill') {
       document.getElementById('submit-answer-btn').disabled = false;
+    } else if (q.type === 'multiple') {
+      selectedMultiAnswers = [];
+      document.getElementById('submit-answer-btn').disabled = true;
     } else {
       selectedAnswer = null;
     }
@@ -1236,7 +1264,7 @@ async function renderFullPreview() {
     examProgress = { total_count: data.total_count, answers: data.questions.filter(q => q.is_answered).map(q => ({ index: q.index, is_correct: q.is_correct })) };
     renderQuestionGrid();
     let html = '<div class="full-preview">';
-    const typeMap = { choice: '选择题', fill: '填空题', judge: '判断题' };
+    const typeMap = { choice: '选择题', multiple: '多选题', fill: '填空题', judge: '判断题' };
     data.questions.forEach((q) => {
       const statusCls = q.is_answered ? (q.is_correct ? 'preview-card-correct' : 'preview-card-wrong') : 'preview-card-empty';
       const statusText = q.is_answered ? (q.is_correct ? '✓ 正确' : '✗ 错误') : '未作答';
@@ -1267,6 +1295,25 @@ async function renderFullPreview() {
             <div class="preview-option" style="cursor:pointer" onclick="submitInlineAnswer(${examId}, ${q.id}, ${q.index}, '\u5bf9')">A. 对</div>
             <div class="preview-option" style="cursor:pointer" onclick="submitInlineAnswer(${examId}, ${q.id}, ${q.index}, '\u9519')">B. 错</div>
           `;
+        }
+      } else if (q.type === 'multiple' && q.options) {
+        const labels = 'ABCDEFGH';
+        if (q.is_answered) {
+          const ca = Array.isArray(q.answer) ? q.answer : [q.answer];
+          const ua = Array.isArray(q.user_answer) ? q.user_answer : [q.user_answer];
+          q.options.forEach((opt, i) => {
+            const letter = labels[i];
+            let cls = 'preview-option';
+            if (ca.includes(letter)) cls += ' preview-option-correct';
+            else if (ua.includes(letter)) cls += ' preview-option-wrong';
+            optionsHtml += `<div class="${cls}">${letter}. ${escHtml(opt)}</div>`;
+          });
+        } else {
+          q.options.forEach((opt, i) => {
+            const letter = labels[i];
+            optionsHtml += `<div class="preview-option preview-multi-option" data-letter="${letter}" onclick="togglePreviewMulti(this)" style="cursor:pointer">${letter}. ${escHtml(opt)}</div>`;
+          });
+          optionsHtml += `<button class="btn btn-primary btn-sm mt-2" onclick="submitInlineMulti(${examId}, ${q.id}, ${q.index})">提交</button>`;
         }
       } else if (q.type === 'fill' && !q.is_answered) {
         const multi = Array.isArray(q.answer) && q.answer.length > 1;
@@ -1354,6 +1401,20 @@ function updatePreviewCard(index, questionId, isCorrect, correctAnswer, userAnsw
       const text = opt.textContent.replace(/^[A-Z]\.\s*/, '');
       newOptionsHtml += `<div class="${cls}">${letter}. ${escHtml(text.trim())}</div>`;
     });
+  } else if (typeText === '多选题' || typeText === 'multiple') {
+    const labels = 'ABCDEFGH';
+    const ca = Array.isArray(correctAnswer) ? correctAnswer : [String(correctAnswer || '')];
+    const ua = Array.isArray(userAnswer) ? userAnswer : [String(userAnswer || '')];
+    const options = optionsDiv.querySelectorAll('.preview-option');
+    newOptionsHtml = '';
+    options.forEach((opt, i) => {
+      const letter = labels[i];
+      let cls = 'preview-option';
+      if (ca.includes(letter)) cls += ' preview-option-correct';
+      else if (ua.includes(letter)) cls += ' preview-option-wrong';
+      const text = opt.textContent.replace(/^[A-Z]\.\s*/, '');
+      newOptionsHtml += `<div class="${cls}">${letter}. ${escHtml(text.trim())}</div>`;
+    });
   } else if (typeText === '判断题' || typeText === 'judge') {
     const labels = { '对': 'A', '错': 'B' };
     const ca = String(correctAnswer || '');
@@ -1401,11 +1462,33 @@ async function submitInlineFill(examId, questionId, index) {
   await submitInlineAnswer(examId, questionId, index, answer);
 }
 
+function togglePreviewMulti(el) {
+  el.classList.toggle('selected');
+}
+
+async function submitInlineMulti(examId, questionId, index) {
+  if (examPaused) return;
+  const selected = [...document.querySelectorAll(`.preview-multi-option.selected`)].map(el => el.dataset.letter);
+  if (selected.length === 0) { alert('请至少选择一个选项'); return; }
+  await submitInlineAnswer(examId, questionId, index, selected);
+}
+
 function selectChoice(el, value) {
   $$('.choice-option').forEach(c => c.classList.remove('selected'));
   el.classList.add('selected');
   selectedAnswer = value;
   document.getElementById('submit-answer-btn').disabled = false;
+}
+
+function toggleMultiChoice(el, value) {
+  el.classList.toggle('selected');
+  const idx = selectedMultiAnswers.indexOf(value);
+  if (idx === -1) {
+    selectedMultiAnswers.push(value);
+  } else {
+    selectedMultiAnswers.splice(idx, 1);
+  }
+  document.getElementById('submit-answer-btn').disabled = selectedMultiAnswers.length === 0;
 }
 
 function startTimer(remaining) {
@@ -1442,6 +1525,10 @@ async function submitCurrentAnswer() {
   const timeSpent = Math.max(1, Math.floor((Date.now() - state.questionStartTime) / 1000));
 
   let userAnswer = selectedAnswer || null;
+  if (selectedMultiAnswers.length > 0) {
+    userAnswer = [...selectedMultiAnswers];
+    selectedMultiAnswers = [];
+  }
   const fillInputs = document.querySelectorAll('.fill-input');
   if (fillInputs.length > 0) {
     userAnswer = [...fillInputs].map(inp => inp.value.trim()).filter(v => v !== '');
@@ -1562,6 +1649,7 @@ function downloadSample() {
     description: "这是一个示例题库",
     questions: [
       { type: "choice", chapter: "第一章 基础", content: "中国的首都是？", options: ["A. 上海", "B. 北京", "C. 广州", "D. 深圳"], answer: "B", analysis: "北京是中国的首都。" },
+      { type: "multiple", chapter: "第一章 基础", content: "以下哪些是中国的直辖市？", options: ["A. 北京", "B. 上海", "C. 广州", "D. 重庆"], answer: ["A", "B", "D"], analysis: "中国的直辖市有北京、上海、天津、重庆。" },
       { type: "fill", content: "中国的首都是____。", answer: "北京" },
       { type: "fill", content: "中国的四大发明是____、____、____和____。", answer: ["造纸术", "印刷术", "火药", "指南针"] },
       { type: "judge", content: "长江是中国最长的河流。", answer: "对" },

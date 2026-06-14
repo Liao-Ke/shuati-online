@@ -27,6 +27,7 @@ bank_data = {
         {"type": "fill", "chapter": "基础", "content": "中国的首都是____", "answer": "北京"},
         {"type": "fill", "chapter": "进阶", "content": "四大发明是____、____、____和____", "answer": ["造纸术", "印刷术", "火药", "指南针"]},
         {"type": "judge", "chapter": "基础", "content": "地球是圆的", "answer": "对"},
+        {"type": "multiple", "chapter": "基础", "content": "以下哪些是数字？", "options": ["A. 一", "B. 二", "C. 三", "D. 四"], "answer": ["A", "B", "C", "D"]},
     ]
 }
 r = client.post('/api/question-banks/import', json=bank_data, headers=headers)
@@ -42,7 +43,7 @@ print(f'3. List banks: {len(r.json())} 个')
 # 4. Start exam
 r = client.post('/api/exam/start', json={
     "bank_ids": [bank_id], "mode": "sequential",
-    "types": ["choice", "fill", "judge"],
+    "types": ["choice", "fill", "judge", "multiple"],
     "choice_timeout": 30, "judge_fill_timeout": 60
 }, headers=headers)
 exam_id = r.json()['exam_id']
@@ -52,10 +53,11 @@ print(f'4. Start exam: id={exam_id}, total={total}')
 # 5. Answer all questions
 correct_count = 0
 answers = [
-    ("choice", "B"),  # Correct
-    ("fill", "上海"),  # Wrong
+    ("choice", "B"),                           # Correct
+    ("fill", "上海"),                           # Wrong
     ("fill", ["造纸术", "印刷术", "火药", "指南针"]),  # Correct
-    ("judge", "错"),  # Wrong
+    ("judge", "错"),                            # Wrong
+    ("multiple", ["A", "B", "C", "D"]),        # Correct
 ]
 for i, (qtype, ans) in enumerate(answers, 1):
     r = client.get(f'/api/exam/{exam_id}/current', headers=headers)
@@ -115,7 +117,7 @@ print(f'11. Static index.html: OK')
 r = client.get(f'/api/question-banks/{bank_id}', headers=headers)
 assert r.status_code == 200
 bank = r.json()
-assert len(bank['questions']) == 4
+assert len(bank['questions']) == 5
 print(f'12. Bank detail: {len(bank["questions"])} 题, chapters: {set(q.get("chapter") for q in bank["questions"])}')
 
 # 13. Delete bank
@@ -137,7 +139,7 @@ print(f'15. Re-import bank: id={new_bank_id}')
 # 16. Start exam for navigation test
 r = client.post('/api/exam/start', json={
     "bank_ids": [new_bank_id], "mode": "sequential",
-    "types": ["choice", "fill", "judge"],
+    "types": ["choice", "fill", "judge", "multiple"],
     "choice_timeout": 30, "judge_fill_timeout": 60
 }, headers=headers)
 nav_exam_id = r.json()['exam_id']
@@ -181,11 +183,11 @@ print(f'20. Navigate out of bounds: 400')
 # 22. Review questions
 r = client.post('/api/review/questions', json={
     "bank_ids": [new_bank_id],
-    "types": ["choice", "fill", "judge"],
+    "types": ["choice", "fill", "judge", "multiple"],
 }, headers=headers)
 assert r.status_code == 200
 questions = r.json()
-assert len(questions) == 4
+assert len(questions) == 5
 for q in questions:
     assert q['answer'] is not None  # 答案可见
     assert q['review_status'] is None  # 未标记过
@@ -244,4 +246,24 @@ assert len(type_filtered) == 1
 assert type_filtered[0]['type'] == 'choice'
 print(f'27. Type filter: {len(type_filtered)} 题')
 
-print('\n=== All 27 tests passed! ===')
+# 27. Review with type filter (choice)
+r = client.post('/api/review/questions', json={
+    "bank_ids": [new_bank_id],
+    "types": ["choice"],
+}, headers=headers)
+type_filtered = r.json()
+assert len(type_filtered) == 1
+assert type_filtered[0]['type'] == 'choice'
+print(f'27. Type filter: {len(type_filtered)} 题')
+
+# 28. Review with type filter (multiple)
+r = client.post('/api/review/questions', json={
+    "bank_ids": [new_bank_id],
+    "types": ["multiple"],
+}, headers=headers)
+multi_filtered = r.json()
+assert len(multi_filtered) == 1
+assert multi_filtered[0]['type'] == 'multiple'
+print(f'28. Multiple type filter: {len(multi_filtered)} 题')
+
+print('\n=== All 28 tests passed! ===')
