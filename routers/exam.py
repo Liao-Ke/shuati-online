@@ -27,6 +27,10 @@ def _load_all_exam_questions(exam: ExamRecord, db: Session) -> tuple[list[Questi
     for bank in banks:
         all_questions.extend(bank.questions)
 
+    if exam.question_ids:
+        selected_ids = set(json.loads(exam.question_ids))
+        all_questions = [q for q in all_questions if q.id in selected_ids]
+
     if exam.mode == "random":
         random.seed(exam.id)
         random.shuffle(all_questions)
@@ -62,18 +66,27 @@ def start_exam(data: ExamStart, user: User = Depends(get_current_user), db: Sess
     if not questions:
         raise HTTPException(status_code=400, detail="没有符合条件的题目")
 
+    if data.question_count and data.question_count < len(questions):
+        random.seed(user.id + hash(str(data.bank_ids)) + (data.question_count or 0))
+        selected = random.sample(questions, data.question_count)
+        question_ids = [q.id for q in selected]
+    else:
+        selected = questions
+        question_ids = None
+
     exam = ExamRecord(
         user_id=user.id,
         bank_ids=json.dumps(data.bank_ids),
         mode=data.mode,
-        question_count=len(questions),
+        question_count=len(selected),
+        question_ids=json.dumps(question_ids) if question_ids else None,
         status="in_progress",
     )
     db.add(exam)
     db.commit()
     db.refresh(exam)
 
-    return {"exam_id": exam.id, "total_count": len(questions)}
+    return {"exam_id": exam.id, "total_count": len(selected)}
 
 
 @router.get("/{exam_id}/current")

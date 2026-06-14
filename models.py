@@ -57,6 +57,7 @@ class ExamRecord(Base):
     bank_ids = Column(Text, nullable=False)
     mode = Column(String(10), nullable=False)
     question_count = Column(Integer, default=0)
+    question_ids = Column(Text, nullable=True)
     correct_count = Column(Integer, default=0)
     wrong_count = Column(Integer, default=0)
     duration_seconds = Column(Integer, default=0)

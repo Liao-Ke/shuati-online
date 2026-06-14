@@ -325,6 +325,23 @@ router.add('/exam/setup', async () => {
         </div>
       </div></div>
       <div class="card mb-4"><div class="card-body">
+        <h5>题目数量</h5>
+        <div class="mt-2">
+          <label class="d-flex align-items-center gap-2 mb-2">
+            <input type="checkbox" class="form-check-input" id="question-count-all" checked onchange="toggleQuestionCountAll()">
+            <span>全部题目</span>
+          </label>
+          <div id="question-count-custom" class="question-count-custom disabled">
+            <div class="d-flex align-items-center gap-3 mb-2">
+              <input type="range" class="form-range question-count-slider" id="question-count-slider" min="1" max="100" value="10" oninput="syncCountFromSlider()">
+              <input type="number" class="form-control question-count-input" id="question-count-input" value="10" min="1" max="100" oninput="syncCountFromInput()">
+              <span class="text-muted small text-nowrap">（共 <span id="question-count-total">0</span> 题可选）</span>
+            </div>
+            <div class="d-flex gap-2 flex-wrap" id="question-count-quick"></div>
+          </div>
+        </div>
+      </div></div>
+      <div class="card mb-4"><div class="card-body">
         <h5>单题计时</h5>
         <div class="row g-3 mt-1">
           <div class="col-auto"><label class="form-label">选择题</label><input type="number" class="form-control" id="timeout-choice" value="30" min="10" max="300"></div>
@@ -337,7 +354,7 @@ router.add('/exam/setup', async () => {
     banks.forEach(b => {
       bankSelect.innerHTML += `
         <div class="col-md-4 col-6">
-          <div class="bank-check-card" onclick="toggleBankSelect(this)">
+          <div class="bank-check-card" data-question-count="${b.question_count}" onclick="toggleBankSelect(this)">
             <div class="form-check">
               <input type="checkbox" class="form-check-input bank-checkbox" value="${b.id}">
               <label class="form-check-label">${escHtml(b.title)} <span class="text-muted">(${b.question_count} 题)</span></label>
@@ -346,6 +363,13 @@ router.add('/exam/setup', async () => {
         </div>
       `;
     });
+    const firstCard = bankSelect.querySelector('.bank-check-card');
+    if (firstCard) {
+      firstCard.classList.add('selected');
+      firstCard.querySelector('.bank-checkbox').checked = true;
+      document.getElementById('selected-count').textContent = '已选 1 个题库';
+    }
+    updateQuestionCount();
   } catch {
     render('<div class="alert alert-danger">加载失败</div>');
   }
@@ -778,6 +802,7 @@ function toggleBankSelect(el) {
   el.classList.toggle('selected');
   const count = document.querySelectorAll('.bank-checkbox:checked').length;
   document.getElementById('selected-count').textContent = `已选 ${count} 个题库`;
+  updateQuestionCount();
 }
 
 async function startExam() {
@@ -785,10 +810,12 @@ async function startExam() {
   if (selectedBanks.length === 0) { alert('请至少选择一个题库'); return; }
   const mode = document.querySelector('.mode-card.active')?.dataset.mode || 'random';
   const types = [...document.querySelectorAll('.type-filter:checked')].map(cb => cb.value);
+  const allQuestions = document.getElementById('question-count-all').checked;
+  const questionCount = allQuestions ? null : parseInt(document.getElementById('question-count-input').value) || null;
   const choiceTimeout = parseInt(document.getElementById('timeout-choice').value) || 30;
   const fillTimeout = parseInt(document.getElementById('timeout-fill').value) || 60;
   try {
-    const res = await api.startExam({ bank_ids: selectedBanks, mode, types, choice_timeout: choiceTimeout, judge_fill_timeout: fillTimeout });
+    const res = await api.startExam({ bank_ids: selectedBanks, mode, types, question_count: questionCount, choice_timeout: choiceTimeout, judge_fill_timeout: fillTimeout });
     examId = res.exam_id;
     examTotalCount = res.total_count;
     router.navigate('/exam');
@@ -1115,6 +1142,69 @@ function downloadSample() {
 function confirmDeleteBank(id, title) {
   if (!confirm(`确定删除题库「${title}」吗？该操作不可恢复。`)) return;
   api.deleteBank(id).then(() => router.navigate('/banks')).catch(err => alert(err.message));
+}
+
+function updateQuestionCount() {
+  const cards = document.querySelectorAll('.bank-check-card.selected');
+  let total = 0;
+  cards.forEach(c => {
+    total += parseInt(c.dataset.questionCount) || 0;
+  });
+  const allCheckbox = document.getElementById('question-count-all');
+  const slider = document.getElementById('question-count-slider');
+  const input = document.getElementById('question-count-input');
+  const totalEl = document.getElementById('question-count-total');
+  if (!slider || !input || !totalEl) return;
+  totalEl.textContent = total;
+  const cur = parseInt(input.value) || total;
+  const val = Math.min(Math.max(cur, 1), total || 1);
+  slider.max = total || 1;
+  input.max = total || 1;
+  slider.value = val;
+  input.value = val;
+  renderQuickButtons(total);
+}
+
+function renderQuickButtons(total) {
+  const container = document.getElementById('question-count-quick');
+  if (!container) return;
+  const presets = [10, 20, 50].filter(n => n < total);
+  if (presets.length === 0) { container.innerHTML = ''; return; }
+  container.innerHTML = '快捷：' + presets.map(n =>
+    `<button type="button" class="btn btn-outline-secondary btn-sm" onclick="setQuickCount(${n})">${n}</button>`
+  ).join(' ');
+}
+
+function toggleQuestionCountAll() {
+  const all = document.getElementById('question-count-all').checked;
+  const custom = document.getElementById('question-count-custom');
+  custom.classList.toggle('disabled', all);
+  const inputs = custom.querySelectorAll('input, button');
+  inputs.forEach(el => el.disabled = all);
+}
+
+function syncCountFromSlider() {
+  const slider = document.getElementById('question-count-slider');
+  const input = document.getElementById('question-count-input');
+  input.value = slider.value;
+}
+
+function syncCountFromInput() {
+  const slider = document.getElementById('question-count-slider');
+  const input = document.getElementById('question-count-input');
+  let v = parseInt(input.value) || 1;
+  const max = parseInt(input.max) || 1;
+  if (v < 1) v = 1;
+  if (v > max) v = max;
+  input.value = v;
+  slider.value = v;
+}
+
+function setQuickCount(n) {
+  const slider = document.getElementById('question-count-slider');
+  const input = document.getElementById('question-count-input');
+  slider.value = n;
+  input.value = n;
 }
 
 async function init() {

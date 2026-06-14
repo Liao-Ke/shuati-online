@@ -75,6 +75,7 @@ class ExamStart(BaseModel):
     bank_ids: List[int]
     mode: str
     types: Optional[List[str]] = None
+    question_count: Optional[int] = None
     choice_timeout: int = 30
     judge_fill_timeout: int = 60
 

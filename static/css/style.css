@@ -319,6 +319,21 @@ h1, h2, h3, h4, h5, h6 {
   font-size: 1.1rem;
 }
 
+.question-count-custom.disabled {
+  opacity: 0.4;
+  pointer-events: none;
+}
+
+.question-count-slider {
+  flex: 1;
+  max-width: 200px;
+}
+
+.question-count-input {
+  width: 80px !important;
+  text-align: center;
+}
+
 .form-control:focus {
   border-color: var(--primary-light);
   box-shadow: 0 0 0 3px rgba(59,130,246,0.15);
