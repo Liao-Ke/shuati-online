@@ -45,7 +45,10 @@ const api = {
   deleteBank(id) { return this.delete(`/question-banks/${id}`); },
 
   startExam(data) { return this.post('/exam/start', data); },
-  getCurrentQuestion(examId) { return this.get(`/exam/${examId}/current`); },
+  getCurrentQuestion(examId, index = null) {
+    const path = index !== null ? `/exam/${examId}/current?index=${index}` : `/exam/${examId}/current`;
+    return this.get(path);
+  },
   submitAnswer(examId, questionId, userAnswer, timeSpent) {
     return this.post(`/exam/${examId}/answer`, {
       exam_id: examId,

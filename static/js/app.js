@@ -41,6 +41,7 @@ let examTotalCount = 0;
 let selectedAnswer = null;
 let examTimerInterval = null;
 let examTimeoutSeconds = 30;
+let examCurrentIndex = 0;
 
 async function checkAuth() {
   if (!api.token) return false;
@@ -360,11 +361,17 @@ router.add('/exam', () => {
           <span id="exam-timer" class="exam-timer">0:00</span>
         </div>
         <div class="progress exam-progress"><div id="exam-progress-bar" class="progress-bar" style="width:0%"></div></div>
+        <div class="d-flex justify-content-between align-items-center mt-2">
+          <button class="btn btn-outline-secondary btn-sm" id="prev-btn" onclick="navigateExam(-1)">← 上一题</button>
+          <span class="text-muted small" id="exam-nav-hint"></span>
+          <button class="btn btn-outline-secondary btn-sm" id="next-btn" onclick="navigateExam(1)">下一题 →</button>
+        </div>
       </div>
       <div id="exam-content" class="text-center py-5"><div class="spinner-border"></div></div>
     </div>
   `);
-  loadNextQuestion();
+  examCurrentIndex = 0;
+  loadQuestionByIndex(0);
 });
 
 router.add('/result/:id', async ({ id }) => {
@@ -776,24 +783,57 @@ async function startExam() {
   }
 }
 
-async function loadNextQuestion() {
+function updateNavButtons(index, total) {
+  const prev = document.getElementById('prev-btn');
+  const next = document.getElementById('next-btn');
+  const hint = document.getElementById('exam-nav-hint');
+  if (prev) prev.disabled = index <= 0;
+  if (next) next.disabled = index >= total - 1;
+  if (hint) hint.textContent = `${index + 1} / ${total}`;
+}
+
+async function loadQuestionByIndex(index) {
   if (examTimerInterval) clearInterval(examTimerInterval);
   if (!examId) return;
   try {
-    const data = await api.getCurrentQuestion(examId);
+    const data = await api.getCurrentQuestion(examId, index);
     if (!data.question) {
       router.navigate(`/result/${examId}`);
       return;
     }
-    document.getElementById('exam-progress-text').textContent = `第 ${data.current_index}/${data.total_count} 题`;
-    document.getElementById('exam-progress-bar').style.width = `${((data.current_index - 1) / data.total_count) * 100}%`;
+    examCurrentIndex = index;
+    document.getElementById('exam-progress-text').textContent = `第 ${index + 1}/${data.total_count} 题`;
+    document.getElementById('exam-progress-bar').style.width = `${((index + 1) / data.total_count) * 100}%`;
+    updateNavButtons(index, data.total_count);
 
-    const isChoice = data.question.type === 'choice';
+    const typeMap = { choice: '选择题', fill: '填空题', judge: '判断题' };
+    const q = data.question;
+
+    if (data.is_answered) {
+      const icon = data.is_correct ? '<span class="text-success">\u2713</span>' : '<span class="text-danger">\u2717</span>';
+      const feedbackClass = data.is_correct ? 'feedback-correct' : 'feedback-wrong';
+      document.getElementById('exam-timer').textContent = '';
+      document.getElementById('exam-content').innerHTML = `
+        <div class="exam-question">
+          <div class="mb-3">
+            <span class="badge bg-primary me-2">${typeMap[q.type] || q.type}</span>
+            ${q.chapter ? `<span class="badge bg-secondary">${escHtml(q.chapter)}</span>` : ''}
+          </div>
+          <h4 class="mb-4">${escHtml(q.content)}</h4>
+          <div class="feedback ${feedbackClass}">
+            <h3>${icon} ${data.is_correct ? '回答正确！' : '回答错误'}</h3>
+            <p class="mb-1">你的答案: <strong>${escHtml(data.user_answer || '(未作答)')}</strong></p>
+            <p class="mb-1">正确答案: <strong>${escHtml(data.correct_answer)}</strong></p>
+          </div>
+        </div>
+      `;
+      return;
+    }
+
+    const isChoice = q.type === 'choice';
     examTimeoutSeconds = isChoice ? (parseInt(document.getElementById('timeout-choice')?.value) || 30) : (parseInt(document.getElementById('timeout-fill')?.value) || 60);
     state.questionStartTime = Date.now();
 
-    const q = data.question;
-    const typeMap = { choice: '选择题', fill: '填空题', judge: '判断题' };
     let optionsHtml = '';
     if (q.type === 'choice') {
       const opts = JSON.parse(q.options || '[]');
@@ -851,6 +891,12 @@ async function loadNextQuestion() {
   }
 }
 
+function navigateExam(delta) {
+  const newIndex = examCurrentIndex + delta;
+  if (newIndex < 0 || newIndex >= examTotalCount) return;
+  loadQuestionByIndex(newIndex);
+}
+
 function selectChoice(el, value) {
   $$('.choice-option').forEach(c => c.classList.remove('selected'));
   el.classList.add('selected');
@@ -902,28 +948,12 @@ async function submitCurrentAnswer() {
   if (singleFill) userAnswer = singleFill.value.trim() || null;
 
   try {
-    const data = await api.getCurrentQuestion(examId);
+    const data = await api.getCurrentQuestion(examId, examCurrentIndex);
     if (!data.question) { router.navigate(`/result/${examId}`); return; }
     const qid = data.question.id;
-    const result = await api.submitAnswer(examId, qid, userAnswer, timeSpent);
+    await api.submitAnswer(examId, qid, userAnswer, timeSpent);
 
-    const feedbackClass = result.is_correct ? 'feedback-correct' : 'feedback-wrong';
-    const correctAns = Array.isArray(result.correct_answer) ? result.correct_answer.join(', ') : result.correct_answer;
-    document.getElementById('exam-content').innerHTML = `
-      <div class="exam-question">
-        <div class="feedback ${feedbackClass}">
-          <h3>${result.is_correct ? '\u2713 回答正确！' : '\u2717 回答错误'}</h3>
-          ${!result.is_correct ? `<p class="mb-1">正确答案: <strong>${escHtml(correctAns)}</strong></p>` : ''}
-          ${result.analysis ? `<p class="mb-0 small mt-2">解析: ${escHtml(result.analysis)}</p>` : ''}
-        </div>
-        <button class="btn btn-primary btn-lg mt-3" onclick="goToNext()">${result.is_last ? '查看结果' : '下一题'}</button>
-      </div>
-    `;
-    if (result.is_last) {
-      const eid = examId;
-      examId = null;
-      document.querySelector('.exam-header')?.remove();
-    }
+    loadQuestionByIndex(examCurrentIndex);
   } catch (err) {
     alert(err.message);
     if (btn) btn.disabled = false;
@@ -931,12 +961,7 @@ async function submitCurrentAnswer() {
 }
 
 function goToNext() {
-  if (!examId) {
-    const eid = examId;
-    router.navigate(`/result/${eid}`);
-    return;
-  }
-  loadNextQuestion();
+  navigateExam(1);
 }
 
 let importFileList = [];

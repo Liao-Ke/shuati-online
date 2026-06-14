@@ -1,0 +1,23 @@
+services:
+  web:
+    build:
+      context: .
+      args:
+        PIP_INDEX_URL: ${PIP_INDEX_URL:-https://pypi.org/simple}
+    container_name: shuati-web
+    ports:
+      - "8175:8000"
+    environment:
+      - DATABASE_URL=sqlite:///./data/exam.db
+    volumes:
+      - shuati-data:/app/data
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/api/health').read()"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 10s
+
+volumes:
+  shuati-data:

@@ -84,6 +84,10 @@ class ExamCurrent(BaseModel):
     current_index: int
     total_count: int
     question: Optional[QuestionOut] = None
+    is_answered: bool = False
+    user_answer: Optional[str] = None
+    is_correct: Optional[bool] = None
+    correct_answer: Optional[str] = None
 
 
 class AnswerSubmit(BaseModel):

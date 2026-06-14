@@ -20,7 +20,7 @@ def _serialize_question(q: Question, hide_answer: bool = True) -> QuestionOut:
     )
 
 
-def _load_exam_questions(exam: ExamRecord, db: Session) -> tuple[list[Question], list[AnswerRecord]]:
+def _load_all_exam_questions(exam: ExamRecord, db: Session) -> tuple[list[Question], dict[int, AnswerRecord]]:
     bank_ids = json.loads(exam.bank_ids)
     banks = db.query(QuestionBank).filter(QuestionBank.id.in_(bank_ids)).all()
     all_questions = []
@@ -34,8 +34,14 @@ def _load_exam_questions(exam: ExamRecord, db: Session) -> tuple[list[Question],
         all_questions.sort(key=lambda q: (q.bank_id or 0, q.sort_order or 0, q.id or 0))
 
     answered = db.query(AnswerRecord).filter(AnswerRecord.exam_id == exam.id).all()
-    answered_ids = {a.question_id for a in answered}
-    remaining = [q for q in all_questions if q.id not in answered_ids]
+    answered_map = {a.question_id: a for a in answered}
+    return all_questions, answered_map
+
+
+def _load_exam_questions(exam: ExamRecord, db: Session) -> tuple[list[Question], list[AnswerRecord]]:
+    all_questions, answered_map = _load_all_exam_questions(exam, db)
+    answered = list(answered_map.values())
+    remaining = [q for q in all_questions if q.id not in answered_map]
     return remaining, answered
 
 
@@ -71,18 +77,50 @@ def start_exam(data: ExamStart, user: User = Depends(get_current_user), db: Sess
 
 
 @router.get("/{exam_id}/current")
-def current_question(exam_id: int, user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+def current_question(
+    exam_id: int,
+    index: int | None = None,
+    user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
     exam = db.query(ExamRecord).filter(
         ExamRecord.id == exam_id, ExamRecord.user_id == user.id
     ).first()
     if not exam:
         raise HTTPException(status_code=404, detail="练习记录不存在")
 
-    remaining, answered = _load_exam_questions(exam, db)
+    all_questions, answered_map = _load_all_exam_questions(exam, db)
+
+    if index is not None:
+        if index < 0 or index >= len(all_questions):
+            raise HTTPException(status_code=400, detail="索引超出范围")
+        q = all_questions[index]
+        record = answered_map.get(q.id)
+        is_answered = record is not None
+        q_out = _serialize_question(q, hide_answer=not is_answered)
+        user_answer_display = None
+        if record and record.user_answer:
+            try:
+                user_answer_display = json.loads(record.user_answer) if record.user_answer.startswith("[") else record.user_answer
+            except (json.JSONDecodeError, TypeError):
+                user_answer_display = record.user_answer
+        correct_answer = None
+        if is_answered:
+            correct_answer = json.loads(q.answer) if q.answer and q.answer.startswith("[") else q.answer
+        return ExamCurrent(
+            exam_id=exam.id, current_index=index + 1, total_count=exam.question_count,
+            question=q_out, is_answered=is_answered,
+            user_answer=str(user_answer_display) if user_answer_display else None,
+            is_correct=record.is_correct if record else None,
+            correct_answer=str(correct_answer) if correct_answer else None,
+        )
+
+    remaining = [q for q in all_questions if q.id not in answered_map]
 
     if not remaining:
-        return ExamCurrent(exam_id=exam.id, current_index=len(answered), total_count=exam.question_count, question=None)
+        return ExamCurrent(exam_id=exam.id, current_index=len(answered_map), total_count=exam.question_count, question=None)
 
+    answered = list(answered_map.values())
     q = remaining[0]
     q_out = _serialize_question(q, hide_answer=True)
     return ExamCurrent(

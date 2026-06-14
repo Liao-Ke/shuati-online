@@ -134,7 +134,51 @@ assert r.status_code == 201
 new_bank_id = r.json()['id']
 print(f'15. Re-import bank: id={new_bank_id}')
 
-# 16. Review questions
+# 16. Start exam for navigation test
+r = client.post('/api/exam/start', json={
+    "bank_ids": [new_bank_id], "mode": "sequential",
+    "types": ["choice", "fill", "judge"],
+    "choice_timeout": 30, "judge_fill_timeout": 60
+}, headers=headers)
+nav_exam_id = r.json()['exam_id']
+nav_total = r.json()['total_count']
+print(f'16. Start exam for nav: id={nav_exam_id}, total={nav_total}')
+
+# 17. Answer first question
+r = client.get(f'/api/exam/{nav_exam_id}/current', headers=headers)
+q1_id = r.json()['question']['id']
+r = client.post(f'/api/exam/{nav_exam_id}/answer', json={
+    "exam_id": nav_exam_id, "question_id": q1_id,
+    "user_answer": "B", "time_spent_seconds": 5
+}, headers=headers)
+assert r.json()['is_correct']
+print(f'17. Answer Q1: correct')
+
+# 18. Navigate to question by index (get index 0, should show answered)
+r = client.get(f'/api/exam/{nav_exam_id}/current?index=0', headers=headers)
+data = r.json()
+assert data['current_index'] == 1
+assert data['is_answered'] == True
+assert data['user_answer'] is not None
+assert data['is_correct'] == True
+assert data['correct_answer'] is not None
+print(f'18. Navigate to index 0: answered={data["is_answered"]}, correct={data["is_correct"]}')
+
+# 19. Navigate to unanswered question (index 1)
+r = client.get(f'/api/exam/{nav_exam_id}/current?index=1', headers=headers)
+data = r.json()
+assert data['current_index'] == 2
+assert data['is_answered'] == False
+assert data['question'] is not None
+assert data['question']['answer'] is None  # 未答题不应暴露答案
+print(f'19. Navigate to index 1: answered={data["is_answered"]}')
+
+# 20. Navigate out of bounds
+r = client.get(f'/api/exam/{nav_exam_id}/current?index=999', headers=headers)
+assert r.status_code == 400
+print(f'20. Navigate out of bounds: 400')
+
+# 22. Review questions
 r = client.post('/api/review/questions', json={
     "bank_ids": [new_bank_id],
     "types": ["choice", "fill", "judge"],
@@ -145,9 +189,9 @@ assert len(questions) == 4
 for q in questions:
     assert q['answer'] is not None  # 答案可见
     assert q['review_status'] is None  # 未标记过
-print(f'16. Review questions: {len(questions)} 题, 所有答案可见')
+print(f'22. Review questions: {len(questions)} 题, 所有答案可见')
 
-# 17. Mark question as known
+# 23. Mark question as known
 first_qid = questions[0]['id']
 r = client.post('/api/review/mark', json={
     "question_id": first_qid, "status": "known",
@@ -157,9 +201,9 @@ stats = r.json()
 assert stats['known_count'] == 1
 assert stats['reviewing_count'] == 0
 assert stats['total_reviewed'] == 1
-print(f'17. Mark known: OK, stats={stats}')
+print(f'23. Mark known: OK, stats={stats}')
 
-# 18. Mark question as reviewing
+# 24. Mark question as reviewing
 r = client.post('/api/review/mark', json={
     "question_id": first_qid, "status": "reviewing",
 }, headers=headers)
@@ -168,15 +212,15 @@ stats = r.json()
 assert stats['known_count'] == 0
 assert stats['reviewing_count'] == 1
 assert stats['total_reviewed'] == 1
-print(f'18. Mark reviewing: OK, stats={stats}')
+print(f'24. Mark reviewing: OK, stats={stats}')
 
-# 19. Review stats
+# 25. Review stats
 r = client.get('/api/review/stats', headers=headers)
 stats = r.json()
 assert stats['total_reviewed'] == 1
-print(f'19. Stats: {stats}')
+print(f'25. Stats: {stats}')
 
-# 20. Filter by show_reviewing_only (mark first as known first, then only reviewing should show)
+# 26. Filter by show_reviewing_only (mark first as known first, then only reviewing should show)
 r = client.post('/api/review/mark', json={
     "question_id": first_qid, "status": "known",
 }, headers=headers)
@@ -188,9 +232,9 @@ r = client.post('/api/review/questions', json={
 filtered = r.json()
 known_ids = [q['id'] for q in filtered if q['review_status'] == 'known']
 assert len(known_ids) == 0  # 不应包含已掌握的
-print(f'20. Show reviewing only: {len(filtered)} 题, 已排除已掌握的')
+print(f'26. Show reviewing only: {len(filtered)} 题, 已排除已掌握的')
 
-# 21. Review with type filter
+# 27. Review with type filter
 r = client.post('/api/review/questions', json={
     "bank_ids": [new_bank_id],
     "types": ["choice"],
@@ -198,6 +242,6 @@ r = client.post('/api/review/questions', json={
 type_filtered = r.json()
 assert len(type_filtered) == 1
 assert type_filtered[0]['type'] == 'choice'
-print(f'21. Type filter: {len(type_filtered)} 题')
+print(f'27. Type filter: {len(type_filtered)} 题')
 
-print('\n=== All 21 tests passed! ===')
+print('\n=== All 27 tests passed! ===')
