@@ -4,7 +4,7 @@ from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
 from database import get_db
 from models import User, QuestionBank, Question, ExamRecord, AnswerRecord
-from schemas import ExamStart, ExamCurrent, QuestionOut, AnswerSubmit, AnswerResult, ExamResult
+from schemas import ExamStart, ExamCurrent, QuestionOut, AnswerSubmit, AnswerResult, ExamResult, ExamProgress
 from auth import get_current_user
 
 router = APIRouter(prefix="/api/exam", tags=["答题"])
@@ -126,6 +126,32 @@ def current_question(
     return ExamCurrent(
         exam_id=exam.id, current_index=len(answered) + 1,
         total_count=exam.question_count, question=q_out,
+    )
+
+
+@router.get("/{exam_id}/progress", response_model=ExamProgress)
+def exam_progress(
+    exam_id: int,
+    user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    exam = db.query(ExamRecord).filter(
+        ExamRecord.id == exam_id, ExamRecord.user_id == user.id
+    ).first()
+    if not exam:
+        raise HTTPException(status_code=404, detail="练习记录不存在")
+
+    all_questions, answered_map = _load_all_exam_questions(exam, db)
+    answers = []
+    for i, q in enumerate(all_questions):
+        record = answered_map.get(q.id)
+        if record:
+            answers.append({"index": i, "is_correct": record.is_correct})
+
+    return ExamProgress(
+        total_count=len(all_questions),
+        current_index=0,
+        answers=answers,
     )
 
 

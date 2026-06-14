@@ -42,6 +42,7 @@ let selectedAnswer = null;
 let examTimerInterval = null;
 let examTimeoutSeconds = 30;
 let examCurrentIndex = 0;
+let examProgress = null;
 
 async function checkAuth() {
   if (!api.token) return false;
@@ -350,27 +351,40 @@ router.add('/exam/setup', async () => {
   }
 });
 
-router.add('/exam', () => {
+router.add('/exam', async () => {
   showNav();
   if (!examId) { router.navigate('/exam/setup'); return; }
   render(`
-    <div class="exam-container">
-      <div class="exam-header">
-        <div class="d-flex justify-content-between align-items-center mb-2">
-          <span id="exam-progress-text">第 0/0 题</span>
-          <span id="exam-timer" class="exam-timer">0:00</span>
+    <div class="exam-layout">
+      <div class="exam-main">
+        <div class="exam-header">
+          <div class="d-flex justify-content-between align-items-center mb-2">
+            <span id="exam-progress-text">第 0/0 题</span>
+            <span id="exam-timer" class="exam-timer">0:00</span>
+          </div>
+          <div class="progress exam-progress"><div id="exam-progress-bar" class="progress-bar" style="width:0%"></div></div>
+          <div class="d-flex justify-content-between align-items-center mt-2">
+            <button class="btn btn-outline-secondary btn-sm" id="prev-btn" onclick="navigateExam(-1)">← 上一题</button>
+            <span class="text-muted small" id="exam-nav-hint"></span>
+            <button class="btn btn-outline-secondary btn-sm" id="next-btn" onclick="navigateExam(1)">下一题 →</button>
+          </div>
         </div>
-        <div class="progress exam-progress"><div id="exam-progress-bar" class="progress-bar" style="width:0%"></div></div>
-        <div class="d-flex justify-content-between align-items-center mt-2">
-          <button class="btn btn-outline-secondary btn-sm" id="prev-btn" onclick="navigateExam(-1)">← 上一题</button>
-          <span class="text-muted small" id="exam-nav-hint"></span>
-          <button class="btn btn-outline-secondary btn-sm" id="next-btn" onclick="navigateExam(1)">下一题 →</button>
+        <div id="exam-content" class="text-center py-5"><div class="spinner-border"></div></div>
+      </div>
+      <div class="exam-sidebar" id="exam-sidebar">
+        <div class="exam-sidebar-header">题目列表</div>
+        <div id="question-grid"></div>
+        <div class="exam-sidebar-legend">
+          <span><span class="dot dot-correct"></span> 正确</span>
+          <span><span class="dot dot-wrong"></span> 错误</span>
+          <span><span class="dot dot-unanswered"></span> 未答</span>
         </div>
       </div>
-      <div id="exam-content" class="text-center py-5"><div class="spinner-border"></div></div>
     </div>
   `);
   examCurrentIndex = 0;
+  examProgress = await api.getExamProgress(examId);
+  renderQuestionGrid();
   loadQuestionByIndex(0);
 });
 
@@ -792,6 +806,33 @@ function updateNavButtons(index, total) {
   if (hint) hint.textContent = `${index + 1} / ${total}`;
 }
 
+function renderQuestionGrid() {
+  const grid = document.getElementById('question-grid');
+  if (!grid || !examProgress) return;
+  const answeredMap = {};
+  for (const a of examProgress.answers) {
+    answeredMap[a.index] = a.is_correct;
+  }
+  let html = '';
+  for (let i = 0; i < examProgress.total_count; i++) {
+    let cls = 'qnum';
+    if (i === examCurrentIndex) {
+      cls += ' qnum-current';
+    } else if (i in answeredMap) {
+      cls += answeredMap[i] ? ' qnum-correct' : ' qnum-wrong';
+    } else {
+      cls += ' qnum-empty';
+    }
+    html += `<div class="${cls}" onclick="goToQuestion(${i})">${i + 1}</div>`;
+  }
+  grid.innerHTML = html;
+}
+
+function goToQuestion(index) {
+  if (index === examCurrentIndex) return;
+  loadQuestionByIndex(index);
+}
+
 async function loadQuestionByIndex(index) {
   if (examTimerInterval) clearInterval(examTimerInterval);
   if (!examId) return;
@@ -802,6 +843,7 @@ async function loadQuestionByIndex(index) {
       return;
     }
     examCurrentIndex = index;
+    renderQuestionGrid();
     document.getElementById('exam-progress-text').textContent = `第 ${index + 1}/${data.total_count} 题`;
     document.getElementById('exam-progress-bar').style.width = `${((index + 1) / data.total_count) * 100}%`;
     updateNavButtons(index, data.total_count);
@@ -952,6 +994,7 @@ async function submitCurrentAnswer() {
     if (!data.question) { router.navigate(`/result/${examId}`); return; }
     const qid = data.question.id;
     await api.submitAnswer(examId, qid, userAnswer, timeSpent);
+    examProgress = await api.getExamProgress(examId);
 
     loadQuestionByIndex(examCurrentIndex);
   } catch (err) {

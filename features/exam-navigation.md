@@ -1,45 +1,38 @@
-# 答题导航（上一题/下一题）
+# 答题导航（上一题/下一题 + 题号侧边栏）
 
 ## 目标
-答题过程中可以自由切换上一题/下一题，已答题目可回看答案。
+答题过程中可自由切换题目，右侧题号面板可视化显示答题进度，支持点击跳转。
 
 ## 修改范围
 
 ### 后端
-- `schemas.py` — `ExamCurrent` 增加 `is_answered`、`user_answer`、`is_correct`、`correct_answer` 字段
-- `routers/exam.py` — `GET /exam/{id}/current` 接受可选 `index` 参数，按索引返回题目（已答题含答案信息）
+- `schemas.py` — `ExamCurrent` 增加 `is_answered` / `user_answer` / `is_correct` / `correct_answer`；新增 `ExamProgress`
+- `routers/exam.py` — `current` 端点支持 `?index=N` 参数；新增 `/progress` 端点
 
 ### 前端
-- `static/js/api.js` — `getCurrentQuestion(examId, index)` 支持传 index
-- `static/js/app.js` — 新增 `examCurrentIndex`、`loadQuestionByIndex()`、`navigateExam()`、`updateNavButtons()`；答题头部新增 ← 上一题 / 下一题 → 按钮和进度 `3 / 20`
-
-### 其他
-- `database.py` — `DATABASE_URL` 环境变量支持
-- `requirements.txt` — 新增 `bcrypt==4.1.3`（修复 passlib 兼容性）、`greenlet==3.5.1`
-- `Dockerfile`、`docker-compose.yml`、`.dockerignore` — Docker 构建部署支持
+- `static/js/api.js` — `getCurrentQuestion(examId, index)` 支持 index；新增 `getExamProgress()`
+- `static/js/app.js` — 新增 `examCurrentIndex`、`loadQuestionByIndex()`、`navigateExam()`、`updateNavButtons()`、`renderQuestionGrid()`；答题页改为左右布局（左侧内容 + 右侧题号面板）
+- `static/css/style.css` — 新增 `.exam-layout`、`.exam-sidebar`、`#question-grid`、`.qnum-*` 样式，自适应 5 列/10 列网格
 
 ### 测试
-- `test_integration.py` — 增加导航测试 3 条（按索引获取、已答/未答状态、越界），27 项全部通过
+- `test_integration.py` — 27 项全部通过
 
 ## 核心实现
 
+### 后端
 ```
-GET /api/exam/{exam_id}/current?index=N
-  → 返回第 N 题（0-based）
-  → is_answered=true 时附带 user_answer / is_correct / correct_answer
+GET /api/exam/{id}/current?index=N  → 第 N 题（含答案状态）
+GET /api/exam/{id}/progress         → {总题数, 已答题状态列表}
 ```
 
-- 未答题：显示题目+选项+计时器
-- 已答题：显示反馈视图（正确/错误+用户答案+正确答案）
-- 导航按钮在边界自动禁用（第一题/最后一题）
+### 前端交互
+- **← 上一题 / 下一题 →** 按钮导航
+- **右侧题号网格**：绿色=正确、红色=错误、灰色=未答、蓝色边框=当前题
+- 点击题号跳转，答题后网格自动刷新
+- 手机端自动变为 10 列横向布局
 
 ## 验证方式
-
 ```bash
 python test_integration.py
 # === All 27 tests passed! ===
-
-# 容器内验证
-docker build -t shuati:latest .
-docker run -d -p 8000:8000 shuati:latest
 ```

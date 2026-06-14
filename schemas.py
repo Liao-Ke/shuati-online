@@ -180,3 +180,9 @@ class ReviewStats(BaseModel):
     known_count: int = 0
     reviewing_count: int = 0
     total_reviewed: int = 0
+
+
+class ExamProgress(BaseModel):
+    total_count: int
+    current_index: int
+    answers: list[dict] = []
