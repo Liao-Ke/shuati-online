@@ -1,7 +1,10 @@
 import uuid
+from datetime import datetime, timezone, timedelta
+from jose import jwt
 from main import app
 from fastapi.testclient import TestClient
 import pytest
+from auth import SECRET_KEY, ALGORITHM, JWT_ISSUER, JWT_AUDIENCE
 
 
 BANK_DATA = {
@@ -446,3 +449,55 @@ def test_44_cleanup_restore_bank(client, auth_headers):
         "title": "测试题库",
     }, headers=auth_headers)
     assert r.status_code == 200
+
+
+# ── Test: JWT hardening ──
+
+
+def test_45_wrong_issuer_rejected(client):
+    now = datetime.now(timezone.utc).replace(tzinfo=None)
+    token = jwt.encode({
+        "user_id": 999, "exp": now + timedelta(hours=1),
+        "iss": "wrong", "aud": JWT_AUDIENCE, "iat": now,
+    }, SECRET_KEY, algorithm=ALGORITHM)
+    r = client.get("/api/question-banks", headers={"Authorization": f"Bearer {token}"})
+    assert r.status_code == 401, f"wrong issuer should be rejected: {r.text}"
+
+
+def test_46_wrong_audience_rejected(client):
+    now = datetime.now(timezone.utc).replace(tzinfo=None)
+    token = jwt.encode({
+        "user_id": 999, "exp": now + timedelta(hours=1),
+        "iss": JWT_ISSUER, "aud": "wrong-audience", "iat": now,
+    }, SECRET_KEY, algorithm=ALGORITHM)
+    r = client.get("/api/question-banks", headers={"Authorization": f"Bearer {token}"})
+    assert r.status_code == 401, f"wrong audience should be rejected: {r.text}"
+
+
+def test_47_missing_exp_rejected(client):
+    now = datetime.now(timezone.utc).replace(tzinfo=None)
+    token = jwt.encode({
+        "user_id": 999, "iss": JWT_ISSUER, "aud": JWT_AUDIENCE, "iat": now,
+    }, SECRET_KEY, algorithm=ALGORITHM)
+    r = client.get("/api/question-banks", headers={"Authorization": f"Bearer {token}"})
+    assert r.status_code == 401, f"missing exp should be rejected: {r.text}"
+
+
+def test_48_token_within_leeway_accepted(client):
+    now = datetime.now(timezone.utc).replace(tzinfo=None)
+    token = jwt.encode({
+        "user_id": 999, "exp": now - timedelta(seconds=55),
+        "iss": JWT_ISSUER, "aud": JWT_AUDIENCE, "iat": now - timedelta(minutes=5),
+    }, SECRET_KEY, algorithm=ALGORITHM)
+    r = client.get("/api/question-banks", headers={"Authorization": f"Bearer {token}"})
+    assert r.status_code == 401, "token expired within leeway should still be denied (user 999 doesn't exist)"
+
+
+def test_49_token_beyond_leeway_rejected(client):
+    now = datetime.now(timezone.utc).replace(tzinfo=None)
+    token = jwt.encode({
+        "user_id": 999, "exp": now - timedelta(seconds=65),
+        "iss": JWT_ISSUER, "aud": JWT_AUDIENCE, "iat": now - timedelta(minutes=5),
+    }, SECRET_KEY, algorithm=ALGORITHM)
+    r = client.get("/api/question-banks", headers={"Authorization": f"Bearer {token}"})
+    assert r.status_code == 401, "token expired beyond leeway should be rejected"

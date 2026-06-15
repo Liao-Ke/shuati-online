@@ -1,4 +1,5 @@
 import os
+import secrets
 from datetime import datetime, timezone, timedelta
 from jose import jwt, JWTError
 from passlib.context import CryptContext
@@ -8,9 +9,13 @@ from sqlalchemy.orm import Session
 from database import get_db
 from models import User
 
-SECRET_KEY = os.getenv("SECRET_KEY", "exam-platform-secret-key-change-in-production")
+_SECRET_KEY = os.getenv("SECRET_KEY") or secrets.token_hex(32)
+SECRET_KEY = _SECRET_KEY
 ALGORITHM = "HS256"
 ACCESS_TOKEN_EXPIRE_MINUTES = 60 * 24 * 7
+JWT_ISSUER = "shuati-online"
+JWT_AUDIENCE = "shuati-api"
+JWT_LEEWAY = 60
 
 pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
 security = HTTPBearer()
@@ -26,8 +31,14 @@ def verify_password(plain: str, hashed: str) -> bool:
 
 def create_access_token(data: dict) -> str:
     to_encode = data.copy()
-    expire = datetime.now(timezone.utc).replace(tzinfo=None) + timedelta(minutes=ACCESS_TOKEN_EXPIRE_MINUTES)
-    to_encode.update({"exp": expire})
+    now = datetime.now(timezone.utc).replace(tzinfo=None)
+    expire = now + timedelta(minutes=ACCESS_TOKEN_EXPIRE_MINUTES)
+    to_encode.update({
+        "exp": expire,
+        "iss": JWT_ISSUER,
+        "aud": JWT_AUDIENCE,
+        "iat": now,
+    })
     return jwt.encode(to_encode, SECRET_KEY, algorithm=ALGORITHM)
 
 
@@ -37,7 +48,19 @@ def get_current_user(
 ) -> User:
     token = credentials.credentials
     try:
-        payload = jwt.decode(token, SECRET_KEY, algorithms=[ALGORITHM])
+        payload = jwt.decode(
+            token, SECRET_KEY, algorithms=[ALGORITHM],
+            audience=JWT_AUDIENCE,
+            issuer=JWT_ISSUER,
+            options={
+                "verify_signature": True,
+                "verify_exp": True,
+                "verify_aud": True,
+                "verify_iss": True,
+                "require_exp": True,
+                "leeway": JWT_LEEWAY,
+            },
+        )
         user_id = payload.get("user_id")
         if user_id is None:
             raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="无效的 token")
