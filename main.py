@@ -1,4 +1,5 @@
 import os
+import logging
 
 from fastapi import FastAPI
 from fastapi.staticfiles import StaticFiles
@@ -7,12 +8,16 @@ from slowapi.errors import RateLimitExceeded
 from starlette.middleware.cors import CORSMiddleware
 from starlette.middleware.trustedhost import TrustedHostMiddleware
 from database import engine, Base
+from logging_config import setup_logging
 from routers import auth, banks, exam, history, dashboard, wrong_answers, review, questions
 from routers.limiter import limiter
 
 Base.metadata.create_all(bind=engine)
 
 app = FastAPI(title="刷题在线", version="1.0.0")
+
+logger = setup_logging()
+logger.info("服务启动")
 
 cors_origins = os.getenv("CORS_ORIGINS", "*")
 app.add_middleware(

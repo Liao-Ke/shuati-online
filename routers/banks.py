@@ -1,4 +1,5 @@
 import json
+import logging
 from urllib.parse import quote
 from fastapi import APIRouter, Depends, HTTPException, status
 from fastapi.responses import Response
@@ -7,6 +8,8 @@ from database import get_db
 from models import User, QuestionBank, Question
 from schemas import BankImport, BankOut, BankDetail, QuestionOut, ImportResult, BatchImportResponse, BankUpdate
 from auth import get_current_user
+
+logger = logging.getLogger("shuati")
 
 router = APIRouter(prefix="/api/question-banks", tags=["题库"])
 
@@ -115,7 +118,9 @@ def import_bank(data: BankImport, user: User = Depends(get_current_user), db: Se
     errors = validate_bank_import(data)
     if errors:
         raise HTTPException(status_code=400, detail="; ".join(errors))
-    return _do_import_one(data, user, db)
+    result = _do_import_one(data, user, db)
+    logger.info(f"用户 {user.id} 导入题库：{result.title}，{result.question_count} 题")
+    return result
 
 
 @router.post("/import-multiple", response_model=BatchImportResponse)
@@ -155,6 +160,7 @@ def delete_bank(bank_id: int, user: User = Depends(get_current_user), db: Sessio
     ).first()
     if not bank:
         raise HTTPException(status_code=404, detail="题库不存在")
+    logger.info(f"用户 {user.id} 删除题库：{bank.title}")
     db.delete(bank)
     db.commit()
 

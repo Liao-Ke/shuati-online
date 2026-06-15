@@ -1,5 +1,6 @@
 import json
 import random
+import logging
 from fastapi import APIRouter, Depends, HTTPException
 from utils import parse_json_field
 from sqlalchemy.orm import Session
@@ -7,6 +8,8 @@ from database import get_db
 from models import User, QuestionBank, Question, ExamRecord, AnswerRecord, utcnow
 from schemas import ExamStart, ExamCurrent, QuestionOut, AnswerSubmit, AnswerResult, ExamResult, ExamProgress
 from auth import get_current_user
+
+logger = logging.getLogger("shuati")
 
 router = APIRouter(prefix="/api/exam", tags=["答题"])
 
@@ -88,6 +91,7 @@ def start_exam(data: ExamStart, user: User = Depends(get_current_user), db: Sess
     db.commit()
     db.refresh(exam)
 
+    logger.info(f"用户 {user.id} 开始考试，exam_id={exam.id}，题目数={len(selected)}")
     return {"exam_id": exam.id, "total_count": len(selected), "timer_mode": data.timer_mode, "started_at": exam.started_at.isoformat()}
 
 
@@ -288,6 +292,7 @@ def finish_exam(
     exam.status = "completed"
     exam.finished_at = utcnow()
     db.commit()
+    logger.info(f"用户 {user.id} 完成考试，exam_id={exam.id}")
     return {"exam_id": exam.id, "status": "completed"}
 
 

@@ -1,5 +1,6 @@
 import os
 import secrets
+import logging
 from datetime import datetime, timezone, timedelta
 from jose import jwt, JWTError
 from passlib.context import CryptContext
@@ -8,6 +9,8 @@ from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from sqlalchemy.orm import Session
 from database import get_db
 from models import User
+
+logger = logging.getLogger("shuati")
 
 _SECRET_KEY = os.getenv("SECRET_KEY") or secrets.token_hex(32)
 SECRET_KEY = _SECRET_KEY
@@ -63,10 +66,13 @@ def get_current_user(
         )
         user_id = payload.get("user_id")
         if user_id is None:
+            logger.warning("JWT 解码成功但缺少 user_id")
             raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="无效的 token")
     except JWTError:
+        logger.warning("JWT 验证失败")
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="无效的 token")
     user = db.query(User).filter(User.id == user_id).first()
     if user is None:
+        logger.warning(f"user_id={user_id} 对应的用户不存在")
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="用户不存在")
     return user
