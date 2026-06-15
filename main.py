@@ -12,11 +12,12 @@ from logging_config import setup_logging
 from routers import auth, banks, exam, history, dashboard, wrong_answers, review, questions
 from routers.limiter import limiter
 
+logger = setup_logging()
 Base.metadata.create_all(bind=engine)
+logger.warning("使用 Base.metadata.create_all 建表，仅适用于开发环境。生产环境请确保通过 alembic upgrade head 管理 schema 版本。")
 
 app = FastAPI(title="刷题在线", version="1.0.0")
 
-logger = setup_logging()
 logger.info("服务启动")
 
 cors_origins = os.getenv("CORS_ORIGINS", "*")
