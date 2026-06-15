@@ -9,6 +9,7 @@ services:
       - "8175:8000"
     environment:
       - DATABASE_URL=sqlite:///./data/exam.db
+      - SECRET_KEY=${SECRET_KEY:?SECRET_KEY must be set for production}
     volumes:
       - shuati-data:/app/data
     restart: unless-stopped
