@@ -51,6 +51,7 @@ let examScrollTimer = null;
 let examTimerMode = 'per_question';
 let examStartedAt = null;
 let examElapsedInterval = null;
+let examElapsedOffset = 0;
 
 async function checkAuth() {
   if (!api.token) return false;
@@ -467,6 +468,7 @@ router.add('/exam', async () => {
   examTimerMode = sessionStorage.getItem('examTimerMode') || 'per_question';
   const savedStarted = sessionStorage.getItem('examStartedAt');
   if (savedStarted) examStartedAt = savedStarted;
+  examElapsedOffset = parseInt(sessionStorage.getItem('examElapsedOffset')) || 0;
   if (examTimerMode === 'elapsed') startElapsedTimer();
   examProgress = await api.getExamProgress(examId);
   renderQuestionGrid();
@@ -995,9 +997,11 @@ async function startExam() {
     examTotalCount = res.total_count;
     examTimerMode = res.timer_mode;
     examStartedAt = res.started_at;
+    examElapsedOffset = 0;
     sessionStorage.setItem('activeExamId', examId);
     sessionStorage.setItem('examTimerMode', examTimerMode);
     sessionStorage.setItem('examStartedAt', examStartedAt);
+    sessionStorage.setItem('examElapsedOffset', '0');
     router.navigate('/exam');
   } catch (err) {
     alert(err.message);
@@ -1111,12 +1115,14 @@ async function loadQuestionByIndex(index) {
 
     const isChoice = q.type === 'choice';
     const isMultiple = q.type === 'multiple';
-    examTimeoutSeconds = isChoice
-      ? (parseInt(document.getElementById('timeout-choice')?.value) || 30)
-      : (isMultiple
-        ? (parseInt(document.getElementById('timeout-multi')?.value) || 45)
-        : (parseInt(document.getElementById('timeout-fill')?.value) || 60));
-    state.questionStartTime = Date.now();
+    if (examTimerMode !== 'elapsed') {
+      examTimeoutSeconds = isChoice
+        ? (parseInt(document.getElementById('timeout-choice')?.value) || 30)
+        : (isMultiple
+          ? (parseInt(document.getElementById('timeout-multi')?.value) || 45)
+          : (parseInt(document.getElementById('timeout-fill')?.value) || 60));
+      state.questionStartTime = Date.now();
+    }
 
     let optionsHtml = '';
     if (q.type === 'choice') {
@@ -1178,7 +1184,9 @@ async function loadQuestionByIndex(index) {
       selectedAnswer = null;
     }
 
-    startTimer();
+    if (examTimerMode !== 'elapsed') {
+      startTimer();
+    }
   } catch {
     document.getElementById('exam-content').innerHTML = '<div class="alert alert-danger">加载题目失败</div>';
   }
@@ -1196,8 +1204,19 @@ function pauseExam() {
   clearInterval(examTimerInterval);
   examTimerInterval = null;
   examPaused = true;
-  const timerEl = document.getElementById('exam-timer');
-  examPauseRemaining = parseTime(timerEl.textContent);
+  if (examTimerMode === 'elapsed') {
+    clearInterval(examElapsedInterval);
+    examElapsedInterval = null;
+    const timerEl = document.getElementById('exam-timer');
+    if (timerEl) {
+      examPauseRemaining = parseTime(timerEl.textContent);
+      examElapsedOffset = examPauseRemaining;
+      sessionStorage.setItem('examElapsedOffset', examElapsedOffset);
+    }
+  } else {
+    const timerEl = document.getElementById('exam-timer');
+    examPauseRemaining = parseTime(timerEl.textContent);
+  }
   document.getElementById('exam-pause-overlay').classList.remove('d-none');
 }
 
@@ -1205,7 +1224,13 @@ function resumeExam() {
   if (!examPaused) return;
   examPaused = false;
   document.getElementById('exam-pause-overlay').classList.add('d-none');
-  startTimer(examPauseRemaining);
+  if (examTimerMode === 'elapsed') {
+    examStartedAt = new Date().toISOString();
+    sessionStorage.setItem('examStartedAt', examStartedAt);
+    startElapsedTimer();
+  } else {
+    startTimer(examPauseRemaining);
+  }
 }
 
 async function finishExam() {
@@ -1221,6 +1246,7 @@ async function finishExam() {
     sessionStorage.removeItem('examMode');
     sessionStorage.removeItem('examTimerMode');
     sessionStorage.removeItem('examStartedAt');
+    sessionStorage.removeItem('examElapsedOffset');
     document.removeEventListener('keydown', examKeyHandler);
     router.navigate(`/result/${examId}`);
   } catch (err) {
@@ -1253,13 +1279,24 @@ function trackPreviewScroll() {
 
 function startElapsedTimer() {
   if (examElapsedInterval) clearInterval(examElapsedInterval);
-  const start = examStartedAt ? new Date(examStartedAt).getTime() : Date.now();
+  if (!examStartedAt) examStartedAt = new Date().toISOString();
+  const start = new Date(examStartedAt).getTime();
   const update = () => {
-    const elapsed = Math.floor((Date.now() - start) / 1000);
-    const el = document.getElementById('exam-elapsed');
-    if (el) {
-      el.textContent = '总 ' + formatTime(elapsed);
-      el.classList.remove('d-none');
+    const elapsed = examElapsedOffset + Math.floor((Date.now() - start) / 1000);
+    if (examTimerMode === 'elapsed') {
+      const timerEl = document.getElementById('exam-timer');
+      if (timerEl) {
+        timerEl.textContent = formatTime(elapsed);
+        timerEl.className = 'exam-timer';
+      }
+      const elEl = document.getElementById('exam-elapsed');
+      if (elEl) elEl.classList.add('d-none');
+    } else {
+      const el = document.getElementById('exam-elapsed');
+      if (el) {
+        el.textContent = '总 ' + formatTime(elapsed);
+        el.classList.remove('d-none');
+      }
     }
   };
   update();
@@ -1567,7 +1604,7 @@ async function submitCurrentAnswer() {
   const btn = document.getElementById('submit-answer-btn');
   if (btn) btn.disabled = true;
 
-  const timeSpent = Math.max(1, Math.floor((Date.now() - state.questionStartTime) / 1000));
+  const timeSpent = examTimerMode === 'elapsed' ? 0 : Math.max(1, Math.floor((Date.now() - state.questionStartTime) / 1000));
 
   let userAnswer = selectedAnswer || null;
   if (selectedMultiAnswers.length > 0) {
@@ -2004,6 +2041,7 @@ async function init() {
   if (savedIdx) examCurrentIndex = parseInt(savedIdx);
   examTimerMode = sessionStorage.getItem('examTimerMode') || 'per_question';
   examStartedAt = sessionStorage.getItem('examStartedAt') || null;
+  examElapsedOffset = parseInt(sessionStorage.getItem('examElapsedOffset')) || 0;
   const authed = await checkAuth();
   if (!authed && !location.hash.match(/^\#\/(login|register)$/)) {
     router.navigate('/login');

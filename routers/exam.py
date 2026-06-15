@@ -225,6 +225,8 @@ def submit_answer(data: AnswerSubmit, user: User = Depends(get_current_user), db
     if is_last:
         exam.status = "completed"
         exam.finished_at = utcnow()
+        if exam.timer_mode == "elapsed" and exam.started_at and exam.finished_at:
+            exam.duration_seconds = int((exam.finished_at - exam.started_at).total_seconds())
         db.commit()
 
     correct_display = correct_answer
@@ -291,6 +293,8 @@ def finish_exam(
         return {"exam_id": exam.id, "status": "completed"}
     exam.status = "completed"
     exam.finished_at = utcnow()
+    if exam.timer_mode == "elapsed" and exam.started_at and exam.finished_at:
+        exam.duration_seconds = int((exam.finished_at - exam.started_at).total_seconds())
     db.commit()
     logger.info(f"用户 {user.id} 完成考试，exam_id={exam.id}")
     return {"exam_id": exam.id, "status": "completed"}
