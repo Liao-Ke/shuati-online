@@ -932,6 +932,18 @@ function logout() {
   router.navigate('/login');
 }
 
+function parseAnswerArray(val) {
+  if (!val) return [];
+  const s = String(val);
+  if (s.startsWith('[')) {
+    try {
+      const parsed = JSON.parse(s.replace(/'/g, '"'));
+      if (Array.isArray(parsed)) return parsed.map(String);
+    } catch {}
+  }
+  return [s];
+}
+
 function renderOptions(options, userAnswer, correctAnswer) {
   if (!options || options.length === 0) return '';
   const labels = 'ABCDEFGH';
@@ -1062,6 +1074,22 @@ async function loadQuestionByIndex(index) {
       const icon = data.is_correct ? '<span class="text-success">\u2713</span>' : '<span class="text-danger">\u2717</span>';
       const feedbackClass = data.is_correct ? 'feedback-correct' : 'feedback-wrong';
       document.getElementById('exam-timer').textContent = '';
+
+      let answeredOptionsHtml = '';
+      if (q.type === 'choice' || q.type === 'multiple') {
+        const opts = JSON.parse(q.options || '[]');
+        const labels = 'ABCDEFGH';
+        const ua = parseAnswerArray(data.user_answer);
+        const ca = parseAnswerArray(data.correct_answer);
+        answeredOptionsHtml = '<div class="history-options">' + opts.map((opt, i) => {
+          const letter = labels[i];
+          let cls = 'history-option';
+          if (ca.includes(letter)) cls += ' option-correct';
+          else if (ua.includes(letter)) cls += ' option-wrong';
+          return `<div class="${cls}">${letter}. ${escHtml(opt)}</div>`;
+        }).join('') + '</div>';
+      }
+
       document.getElementById('exam-content').innerHTML = `
         <div class="exam-question">
           <div class="mb-3">
@@ -1069,6 +1097,7 @@ async function loadQuestionByIndex(index) {
             ${q.chapter ? `<span class="badge bg-secondary">${escHtml(q.chapter)}</span>` : ''}
           </div>
           <h4 class="mb-4">${escHtml(q.content)}</h4>
+          ${answeredOptionsHtml}
           <div class="feedback ${feedbackClass}">
             <h3>${icon} ${data.is_correct ? '回答正确！' : '回答错误'}</h3>
             <p class="mb-1">你的答案: <strong class="${data.is_correct ? 'text-success' : 'text-danger'}">${escHtml(data.user_answer || '(未作答)')}</strong></p>
