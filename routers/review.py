@@ -1,8 +1,7 @@
-import datetime
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
 from database import get_db
-from models import User, QuestionBank, Question, ReviewRecord
+from models import User, QuestionBank, Question, ReviewRecord, utcnow
 from schemas import ReviewFilter, ReviewQuestionOut, MarkBody, ReviewStats
 from auth import get_current_user
 
@@ -80,7 +79,7 @@ def mark_question(
         if record.status != data.status:
             record.status = data.status
             record.review_count += 1
-        record.reviewed_at = datetime.datetime.utcnow()
+        record.reviewed_at = utcnow()
     else:
         record = ReviewRecord(
             user_id=user.id,

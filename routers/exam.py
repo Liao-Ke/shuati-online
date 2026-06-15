@@ -1,11 +1,10 @@
 import json
 import random
-import datetime
 from fastapi import APIRouter, Depends, HTTPException
 from utils import parse_json_field
 from sqlalchemy.orm import Session
 from database import get_db
-from models import User, QuestionBank, Question, ExamRecord, AnswerRecord
+from models import User, QuestionBank, Question, ExamRecord, AnswerRecord, utcnow
 from schemas import ExamStart, ExamCurrent, QuestionOut, AnswerSubmit, AnswerResult, ExamResult, ExamProgress
 from auth import get_current_user
 
@@ -221,7 +220,7 @@ def submit_answer(data: AnswerSubmit, user: User = Depends(get_current_user), db
 
     if is_last:
         exam.status = "completed"
-        exam.finished_at = datetime.datetime.utcnow()
+        exam.finished_at = utcnow()
         db.commit()
 
     correct_display = correct_answer
@@ -287,7 +286,7 @@ def finish_exam(
     if exam.status == "completed":
         return {"exam_id": exam.id, "status": "completed"}
     exam.status = "completed"
-    exam.finished_at = __import__("datetime").datetime.utcnow()
+    exam.finished_at = utcnow()
     db.commit()
     return {"exam_id": exam.id, "status": "completed"}
 
