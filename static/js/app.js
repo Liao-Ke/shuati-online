@@ -996,7 +996,7 @@ async function startExam() {
     examId = res.exam_id;
     examTotalCount = res.total_count;
     examTimerMode = res.timer_mode;
-    examStartedAt = res.started_at;
+    examStartedAt = res.started_at.endsWith('Z') ? res.started_at : res.started_at + 'Z';
     examElapsedOffset = 0;
     sessionStorage.setItem('activeExamId', examId);
     sessionStorage.setItem('examTimerMode', examTimerMode);

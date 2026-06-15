@@ -17,6 +17,7 @@
 4. **暂停恢复适配**（`pauseExam`/`resumeExam`）：`elapsed` 模式下暂停清除 `examElapsedInterval`，将当前值存入 `examElapsedOffset`（同步 `sessionStorage`）；恢复时重置 `examStartedAt`，重启计时器
 5. **刷新恢复累计用时**：`examElapsedOffset` 随暂停写入 `sessionStorage`，页面加载时恢复
 6. **后端写入总用时**（`finish_exam`/`submit_answer`）：`elapsed` 模式下根据 `started_at` 和 `finished_at` 计算 `duration_seconds`
+7. **修复时区 BUG**：后端 `started_at.isoformat()` 返回的 UTC 时间不含时区标记，浏览器 `new Date(str)` 会当作本地时间解析导致多算 8 小时；在 `startExam` 中追加 `Z` 后缀强制按 UTC 解析
 
 ## 影响范围
 
