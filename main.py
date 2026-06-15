@@ -2,10 +2,13 @@ import os
 
 from fastapi import FastAPI
 from fastapi.staticfiles import StaticFiles
+from slowapi import _rate_limit_exceeded_handler
+from slowapi.errors import RateLimitExceeded
 from starlette.middleware.cors import CORSMiddleware
 from starlette.middleware.trustedhost import TrustedHostMiddleware
 from database import engine, Base
 from routers import auth, banks, exam, history, dashboard, wrong_answers, review, questions
+from routers.limiter import limiter
 
 Base.metadata.create_all(bind=engine)
 
@@ -25,6 +28,10 @@ app.add_middleware(
     TrustedHostMiddleware,
     allowed_hosts=allowed_hosts.split(",") if allowed_hosts != "*" else ["*"],
 )
+
+
+app.state.limiter = limiter
+app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
 
 
 @app.get("/api/health")
