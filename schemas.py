@@ -211,3 +211,8 @@ class QuestionUpdate(BaseModel):
 class BankUpdate(BaseModel):
     title: Optional[str] = None
     description: Optional[str] = None
+
+
+class WrongAnswerStartRequest(BaseModel):
+    bank_ids: Optional[List[int]] = None
+    timer_mode: str = "per_question"

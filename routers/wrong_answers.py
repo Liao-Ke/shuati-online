@@ -1,38 +1,78 @@
-from fastapi import APIRouter, Depends
+import json
+
+from fastapi import APIRouter, Depends, HTTPException
 from utils import parse_json_field
 from sqlalchemy.orm import Session
-from sqlalchemy import desc
+from sqlalchemy import desc, func
 from database import get_db
-from models import User, AnswerRecord, ExamRecord
+from models import User, AnswerRecord, ExamRecord, Question, QuestionBank
 from auth import get_current_user
+from schemas import WrongAnswerStartRequest
 
 router = APIRouter(prefix="/api/wrong-answers", tags=["错题"])
 
 
-@router.get("")
-def list_wrong(user: User = Depends(get_current_user), db: Session = Depends(get_db)):
-    records = (
-        db.query(AnswerRecord)
-        .join(ExamRecord)
-        .filter(
-            ExamRecord.user_id == user.id,
-            AnswerRecord.is_correct == False,
+def _get_wrong_question_ids(user: User, db: Session) -> list[int]:
+    """返回用户当前真正答错的题目 ID 列表（基于每题最近一次作答）。"""
+    # 子查询：每道题的最新作答时间
+    subq = (
+        db.query(
+            AnswerRecord.question_id,
+            func.max(AnswerRecord.answered_at).label("max_at"),
         )
+        .join(ExamRecord)
+        .filter(ExamRecord.user_id == user.id)
+        .group_by(AnswerRecord.question_id)
+        .subquery()
+    )
+    # 连接子查询，取最新作答记录，只保留答错的
+    latest_wrong = (
+        db.query(AnswerRecord)
+        .join(
+            subq,
+            (AnswerRecord.question_id == subq.c.question_id)
+            & (AnswerRecord.answered_at == subq.c.max_at),
+        )
+        .filter(AnswerRecord.is_correct == False)
         .order_by(desc(AnswerRecord.answered_at))
         .all()
     )
+    seen = set()
+    ids = []
+    for r in latest_wrong:
+        if r.question_id not in seen:
+            seen.add(r.question_id)
+            ids.append(r.question_id)
+    return ids
 
-    seen_q = set()
+
+@router.get("")
+def list_wrong(user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+    wrong_ids = _get_wrong_question_ids(user, db)
+
+    if not wrong_ids:
+        return []
+
+    # 按 answered_at 降序排列
+    id_order = {qid: i for i, qid in enumerate(wrong_ids)}
+    questions = db.query(Question).filter(Question.id.in_(wrong_ids)).all()
+    questions.sort(key=lambda q: id_order.get(q.id, 9999))
+
     result = []
-    for r in records:
-        if r.question_id in seen_q:
-            continue
-        seen_q.add(r.question_id)
-        q = r.question
-        if not q:
-            continue
-        correct_answer = parse_json_field(q.answer)
-        user_answer = parse_json_field(r.user_answer)
+    for q in questions:
+        # 找该题最近一次（错误的）作答记录，用于展示 user_answer
+        latest_record = (
+            db.query(AnswerRecord)
+            .join(ExamRecord)
+            .filter(
+                ExamRecord.user_id == user.id,
+                AnswerRecord.question_id == q.id,
+                AnswerRecord.is_correct == False,
+            )
+            .order_by(desc(AnswerRecord.answered_at))
+            .first()
+        )
+        user_answer = parse_json_field(latest_record.user_answer) if latest_record else None
         result.append({
             "question_id": q.id,
             "bank_title": q.question_bank.title if q.question_bank else "",
@@ -40,8 +80,52 @@ def list_wrong(user: User = Depends(get_current_user), db: Session = Depends(get
             "chapter": q.chapter,
             "content": q.content,
             "options": parse_json_field(q.options),
-            "correct_answer": correct_answer,
+            "correct_answer": parse_json_field(q.answer),
             "user_answer": user_answer,
             "analysis": q.analysis,
         })
     return result
+
+
+@router.post("/start")
+def start_wrong_answer_practice(
+    data: WrongAnswerStartRequest,
+    user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    """从错题本中筛选错题，创建一场错题练习。"""
+    wrong_ids = _get_wrong_question_ids(user, db)
+
+    if not wrong_ids:
+        raise HTTPException(status_code=400, detail="没有错题可以练习")
+
+    questions = (
+        db.query(Question)
+        .filter(Question.id.in_(wrong_ids))
+        .all()
+    )
+
+    if data.bank_ids:
+        allowed_bank_ids = set(data.bank_ids)
+        questions = [q for q in questions if q.bank_id in allowed_bank_ids]
+
+    if not questions:
+        raise HTTPException(status_code=400, detail="所选题库中没有错题")
+
+    involved_bank_ids = list(set(q.bank_id for q in questions))
+    question_ids = [q.id for q in questions]
+
+    exam = ExamRecord(
+        user_id=user.id,
+        bank_ids=json.dumps(involved_bank_ids),
+        mode="sequential",
+        question_count=len(questions),
+        question_ids=json.dumps(question_ids),
+        timer_mode=data.timer_mode,
+        status="in_progress",
+    )
+    db.add(exam)
+    db.commit()
+    db.refresh(exam)
+
+    return {"exam_id": exam.id, "total_count": len(questions)}

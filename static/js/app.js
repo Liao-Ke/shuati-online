@@ -471,6 +471,7 @@ router.add('/exam', async () => {
   examElapsedOffset = parseInt(sessionStorage.getItem('examElapsedOffset')) || 0;
   if (examTimerMode === 'elapsed') startElapsedTimer();
   examProgress = await api.getExamProgress(examId);
+  if (examCurrentIndex >= examProgress.total_count) examCurrentIndex = 0;
   renderQuestionGrid();
   if (examFullPreview) {
     document.getElementById('mode-toggle-btn').textContent = '📖 单题模式';
@@ -648,7 +649,12 @@ router.add('/wrong-answers', async () => {
   try {
     const wrongs = await api.getWrongAnswers();
     render(`
-      <div class="page-header"><h2>错题本</h2><span class="text-muted">共 ${wrongs.length} 道错题</span></div>
+      <div class="page-header d-flex justify-content-between align-items-center flex-wrap gap-2">
+        <div><h2>错题本</h2><span class="text-muted">共 ${wrongs.length} 道错题</span></div>
+        <button class="btn btn-warning" id="wrong-practice-btn" ${wrongs.length === 0 ? 'disabled' : ''} onclick="openWrongPracticeModal()">
+          📝 错题练习
+        </button>
+      </div>
       ${wrongs.length === 0 ? '<div class="empty-state"><p>太棒了，还没有错题！</p></div>' : ''}
       <div id="wrong-list"></div>
     `);
@@ -998,6 +1004,8 @@ async function startExam() {
     examTimerMode = res.timer_mode;
     examStartedAt = res.started_at.endsWith('Z') ? res.started_at : res.started_at + 'Z';
     examElapsedOffset = 0;
+    examCurrentIndex = 0;
+    sessionStorage.removeItem('examCurrentIndex');
     sessionStorage.setItem('activeExamId', examId);
     sessionStorage.setItem('examTimerMode', examTimerMode);
     sessionStorage.setItem('examStartedAt', examStartedAt);
@@ -2047,6 +2055,95 @@ async function init() {
     router.navigate('/login');
   }
   router.resolve();
+}
+
+// ── 错题练习弹窗 ──
+
+async function openWrongPracticeModal() {
+  const banks = await api.getBanks();
+  const wrongs = await api.getWrongAnswers();
+  const wrongBankTitles = new Set(wrongs.map(w => w.bank_title));
+
+  let bankCheckboxes = '';
+  banks.forEach(b => {
+    const checked = wrongBankTitles.has(b.title) ? 'checked' : '';
+    bankCheckboxes += `
+      <div class="col-md-4 col-6">
+        <div class="bank-check-card">
+          <div class="form-check">
+            <input type="checkbox" class="form-check-input wrong-practice-bank" value="${b.id}" ${checked}>
+            <label class="form-check-label">${escHtml(b.title)} <span class="text-muted">(${b.question_count} 题)</span></label>
+          </div>
+        </div>
+      </div>`;
+  });
+
+  const modalHtml = `
+    <div class="modal fade show d-block" id="wrong-practice-modal" tabindex="-1" style="background:rgba(0,0,0,0.5)">
+      <div class="modal-dialog modal-lg">
+        <div class="modal-content">
+          <div class="modal-header">
+            <h5 class="modal-title">错题练习设置</h5>
+            <button type="button" class="btn-close" onclick="closeWrongPracticeModal()"></button>
+          </div>
+          <div class="modal-body">
+            <p class="text-muted">选择要练习的题库（默认全选有错题的题库），将使用现有答题流程进行练习。</p>
+            <div id="wrong-practice-bank-select" class="row g-2">
+              ${bankCheckboxes}
+            </div>
+            <div class="mt-3">
+              <button class="btn btn-sm btn-link" onclick="document.querySelectorAll('.wrong-practice-bank').forEach(cb=>cb.checked=true)">全选</button>
+              <button class="btn btn-sm btn-link" onclick="document.querySelectorAll('.wrong-practice-bank').forEach(cb=>cb.checked=false)">取消全选</button>
+            </div>
+          </div>
+          <div class="modal-footer">
+            <button type="button" class="btn btn-secondary" onclick="closeWrongPracticeModal()">取消</button>
+            <button type="button" class="btn btn-warning" id="wrong-practice-start-btn" onclick="startWrongPractice()">开始练习</button>
+          </div>
+        </div>
+      </div>
+    </div>`;
+
+  const overlay = document.createElement('div');
+  overlay.id = 'wrong-practice-overlay';
+  overlay.innerHTML = modalHtml;
+  document.body.appendChild(overlay);
+}
+
+function closeWrongPracticeModal() {
+  const overlay = document.getElementById('wrong-practice-overlay');
+  if (overlay) overlay.remove();
+}
+
+async function startWrongPractice() {
+  const selectedBanks = [...document.querySelectorAll('.wrong-practice-bank:checked')].map(cb => parseInt(cb.value));
+  if (selectedBanks.length === 0) { alert('请至少选择一个题库'); return; }
+  const btn = document.getElementById('wrong-practice-start-btn');
+  btn.disabled = true;
+  btn.textContent = '创建中...';
+  try {
+    const res = await api.startWrongAnswerExam({
+      bank_ids: selectedBanks,
+      timer_mode: 'per_question',
+    });
+    examId = res.exam_id;
+    examTotalCount = res.total_count;
+    examTimerMode = 'per_question';
+    examStartedAt = new Date().toISOString();
+    examElapsedOffset = 0;
+    examCurrentIndex = 0;
+    sessionStorage.removeItem('examCurrentIndex');
+    sessionStorage.setItem('activeExamId', examId);
+    sessionStorage.setItem('examTimerMode', examTimerMode);
+    sessionStorage.setItem('examStartedAt', examStartedAt);
+    sessionStorage.setItem('examElapsedOffset', '0');
+    closeWrongPracticeModal();
+    router.navigate('/exam');
+  } catch (err) {
+    alert(err.message);
+    btn.disabled = false;
+    btn.textContent = '开始练习';
+  }
 }
 
 document.addEventListener('DOMContentLoaded', init);

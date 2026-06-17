@@ -36,6 +36,7 @@ class State:
     exam_id = None
     nav_exam_id = None
     correct_count = 0
+    wrong_exam_id = None
 
 
 state = State()
@@ -129,6 +130,72 @@ def test_07_wrong_answers(client, auth_headers):
     r = client.get("/api/wrong-answers", headers=auth_headers)
     assert r.status_code == 200
     assert len(r.json()) == 2
+
+
+# ── Test: 错题练习 ──
+
+
+def test_07b_wrong_practice_start(client, auth_headers):
+    """POST /api/wrong-answers/start 应返回有效的 exam_id"""
+    r = client.post("/api/wrong-answers/start", json={
+        "bank_ids": [state.bank_id],
+        "timer_mode": "per_question",
+    }, headers=auth_headers)
+    assert r.status_code == 200, f"错题练习启动失败: {r.text}"
+    data = r.json()
+    assert "exam_id" in data
+    assert data["total_count"] == 2  # 测试数据中有 2 道错题
+    state.wrong_exam_id = data["exam_id"]
+
+
+def test_07c_wrong_practice_exam_flow(client, auth_headers):
+    """错题练习的答题流程应正常：获取题目、提交答案、完成"""
+    exam_id = state.wrong_exam_id
+    # 获取当前题目
+    r = client.get(f"/api/exam/{exam_id}/current", headers=auth_headers)
+    assert r.status_code == 200, f"获取当前题目失败: {r.text}"
+    curr = r.json()
+    assert curr["question"] is not None
+    q = curr["question"]
+    # 提交一个答案（故意答错）
+    wrong_answer = "Z" if q["type"] == "choice" else "错"
+    r = client.post(f"/api/exam/{exam_id}/answer", json={
+        "exam_id": exam_id,
+        "question_id": q["id"],
+        "user_answer": wrong_answer,
+        "time_spent_seconds": 5,
+    }, headers=auth_headers)
+    assert r.status_code == 200, f"提交答案失败: {r.text}"
+    # 完成考试
+    r = client.post(f"/api/exam/{exam_id}/finish", json={}, headers=auth_headers)
+    assert r.status_code == 200
+    # 获取结果
+    r = client.get(f"/api/exam/{exam_id}/result", headers=auth_headers)
+    assert r.status_code == 200
+    result = r.json()
+    assert result["total_count"] > 0
+    assert "answers" in result
+
+
+def test_07d_wrong_practice_filter_bank(client, auth_headers):
+    """bank_ids 过滤应生效：指定不存在的题库应返回 400"""
+    r = client.post("/api/wrong-answers/start", json={
+        "bank_ids": [99999],
+        "timer_mode": "per_question",
+    }, headers=auth_headers)
+    assert r.status_code == 400, f"不存在的题库应返回 400: {r.text}"
+
+
+def test_07e_wrong_practice_no_wrong_questions(client, auth_headers):
+    """没有错题时应返回 400"""
+    import uuid
+    suffix = uuid.uuid4().hex[:8]
+    r = client.post("/api/auth/register", json={"username": f"nowrong_{suffix}", "password": "123456"})
+    assert r.status_code == 200
+    token = r.json()["access_token"]
+    headers = {"Authorization": f"Bearer {token}"}
+    r = client.post("/api/wrong-answers/start", json={}, headers=headers)
+    assert r.status_code == 400, f"无错题应返回 400: {r.text}"
 
 
 def test_08_history(client, auth_headers):

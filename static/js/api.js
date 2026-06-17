@@ -92,6 +92,7 @@ const api = {
   getHistoryDetail(examId) { return this.get(`/history/${examId}`); },
 
   getWrongAnswers() { return this.get('/wrong-answers'); },
+  startWrongAnswerExam(data) { return this.post('/wrong-answers/start', data); },
 
   getDashboard() { return this.get('/dashboard'); },
 
