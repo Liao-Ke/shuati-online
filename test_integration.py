@@ -1,11 +1,12 @@
 import uuid
-from datetime import datetime, timezone, timedelta
-from jose import jwt
-from main import app
-from fastapi.testclient import TestClient
-import pytest
-from auth import SECRET_KEY, ALGORITHM, JWT_ISSUER, JWT_AUDIENCE
+from datetime import UTC, datetime, timedelta
 
+import pytest
+from fastapi.testclient import TestClient
+from jose import jwt
+
+from auth import ALGORITHM, JWT_AUDIENCE, JWT_ISSUER, SECRET_KEY
+from main import app
 
 BANK_DATA = {
     "title": "测试题库",
@@ -98,7 +99,7 @@ def test_04_start_exam(client, auth_headers):
 def test_05_answer_all(client, auth_headers):
     exam_id = state.exam_id
     correct_count = 0
-    for i, (qtype, ans) in enumerate(ANSWERS, 1):
+    for _i, (_qtype, ans) in enumerate(ANSWERS, 1):
         r = client.get(f"/api/exam/{exam_id}/current", headers=auth_headers)
         assert r.status_code == 200
         data = r.json()
@@ -522,7 +523,7 @@ def test_44_cleanup_restore_bank(client, auth_headers):
 
 
 def test_45_wrong_issuer_rejected(client):
-    now = datetime.now(timezone.utc).replace(tzinfo=None)
+    now = datetime.now(UTC).replace(tzinfo=None)
     token = jwt.encode({
         "user_id": 999, "exp": now + timedelta(hours=1),
         "iss": "wrong", "aud": JWT_AUDIENCE, "iat": now,
@@ -532,7 +533,7 @@ def test_45_wrong_issuer_rejected(client):
 
 
 def test_46_wrong_audience_rejected(client):
-    now = datetime.now(timezone.utc).replace(tzinfo=None)
+    now = datetime.now(UTC).replace(tzinfo=None)
     token = jwt.encode({
         "user_id": 999, "exp": now + timedelta(hours=1),
         "iss": JWT_ISSUER, "aud": "wrong-audience", "iat": now,
@@ -542,7 +543,7 @@ def test_46_wrong_audience_rejected(client):
 
 
 def test_47_missing_exp_rejected(client):
-    now = datetime.now(timezone.utc).replace(tzinfo=None)
+    now = datetime.now(UTC).replace(tzinfo=None)
     token = jwt.encode({
         "user_id": 999, "iss": JWT_ISSUER, "aud": JWT_AUDIENCE, "iat": now,
     }, SECRET_KEY, algorithm=ALGORITHM)
@@ -551,7 +552,7 @@ def test_47_missing_exp_rejected(client):
 
 
 def test_48_token_within_leeway_accepted(client):
-    now = datetime.now(timezone.utc).replace(tzinfo=None)
+    now = datetime.now(UTC).replace(tzinfo=None)
     token = jwt.encode({
         "user_id": 999, "exp": now - timedelta(seconds=55),
         "iss": JWT_ISSUER, "aud": JWT_AUDIENCE, "iat": now - timedelta(minutes=5),
@@ -561,7 +562,7 @@ def test_48_token_within_leeway_accepted(client):
 
 
 def test_49_token_beyond_leeway_rejected(client):
-    now = datetime.now(timezone.utc).replace(tzinfo=None)
+    now = datetime.now(UTC).replace(tzinfo=None)
     token = jwt.encode({
         "user_id": 999, "exp": now - timedelta(seconds=65),
         "iss": JWT_ISSUER, "aud": JWT_AUDIENCE, "iat": now - timedelta(minutes=5),

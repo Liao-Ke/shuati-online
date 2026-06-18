@@ -1,11 +1,13 @@
 import json
-from fastapi import APIRouter, Depends, HTTPException, status
-from sqlalchemy.orm import Session
+
+from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy import func
-from database import get_db
-from models import User, QuestionBank, Question
-from schemas import QuestionCreate, QuestionUpdate, QuestionOut
+from sqlalchemy.orm import Session
+
 from auth import get_current_user
+from database import get_db
+from models import Question, QuestionBank, User
+from schemas import QuestionCreate, QuestionOut, QuestionUpdate
 
 router = APIRouter(prefix="/api", tags=["题目"])
 

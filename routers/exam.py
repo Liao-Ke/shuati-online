@@ -1,13 +1,15 @@
 import json
-import random
 import logging
+import random
+
 from fastapi import APIRouter, Depends, HTTPException
-from utils import parse_json_field
 from sqlalchemy.orm import Session
-from database import get_db
-from models import User, QuestionBank, Question, ExamRecord, AnswerRecord, utcnow
-from schemas import ExamStart, ExamCurrent, QuestionOut, AnswerSubmit, AnswerResult, ExamResult, ExamProgress
+
 from auth import get_current_user
+from database import get_db
+from models import AnswerRecord, ExamRecord, Question, QuestionBank, User, utcnow
+from schemas import AnswerResult, AnswerSubmit, ExamCurrent, ExamProgress, ExamResult, ExamStart, QuestionOut
+from utils import parse_json_field
 
 logger = logging.getLogger("shuati")
 
@@ -187,15 +189,13 @@ def submit_answer(data: AnswerSubmit, user: User = Depends(get_current_user), db
 
     correct_answer = parse_json_field(question.answer)
 
-    if question.type == "choice":
-        is_correct = data.user_answer == correct_answer
-    elif question.type == "judge":
+    if question.type == "choice" or question.type == "judge":
         is_correct = data.user_answer == correct_answer
     elif question.type == "fill":
         if isinstance(correct_answer, list):
             user_list = data.user_answer if isinstance(data.user_answer, list) else [data.user_answer]
             is_correct = len(user_list) == len(correct_answer) and all(
-                (u or "").strip() == (c or "").strip() for u, c in zip(user_list, correct_answer)
+                (u or "").strip() == (c or "").strip() for u, c in zip(user_list, correct_answer, strict=True)
             )
         else:
             is_correct = (data.user_answer or "").strip() == (correct_answer or "").strip()

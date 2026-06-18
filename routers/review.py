@@ -1,10 +1,11 @@
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
-from database import get_db
-from models import User, QuestionBank, Question, ReviewRecord, utcnow
-from schemas import ReviewFilter, ReviewQuestionOut, MarkBody, ReviewStats
+
 from auth import get_current_user
+from database import get_db
+from models import Question, QuestionBank, ReviewRecord, User, utcnow
+from schemas import MarkBody, ReviewFilter, ReviewQuestionOut, ReviewStats
 
 router = APIRouter(prefix="/api/review", tags=["背题"])
 

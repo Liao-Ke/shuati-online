@@ -1,5 +1,4 @@
 import os
-import logging
 
 from fastapi import FastAPI
 from fastapi.staticfiles import StaticFiles
@@ -7,9 +6,10 @@ from slowapi import _rate_limit_exceeded_handler
 from slowapi.errors import RateLimitExceeded
 from starlette.middleware.cors import CORSMiddleware
 from starlette.middleware.trustedhost import TrustedHostMiddleware
-from database import engine, Base
+
+from database import Base, engine
 from logging_config import setup_logging
-from routers import auth, banks, exam, history, dashboard, wrong_answers, review, questions
+from routers import auth, banks, dashboard, exam, history, questions, review, wrong_answers
 from routers.limiter import limiter
 
 logger = setup_logging()

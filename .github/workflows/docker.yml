@@ -1,0 +1,19 @@
+name: Docker Image
+
+on:
+  push:
+    branches: [main]
+    tags: ["v*"]
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - run: docker build -t shuati-online:latest .
+      - run: docker save shuati-online:latest -o shuati-online.tar
+      - uses: actions/upload-artifact@v4
+        with:
+          name: shuati-online-image
+          path: shuati-online.tar
+          retention-days: 7

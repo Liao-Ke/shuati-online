@@ -1,12 +1,14 @@
+import logging
 import os
 import secrets
-import logging
-from datetime import datetime, timezone, timedelta
-from jose import jwt, JWTError
-from passlib.context import CryptContext
+from datetime import UTC, datetime, timedelta
+
 from fastapi import Depends, HTTPException, status
-from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
+from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
+from jose import JWTError, jwt
+from passlib.context import CryptContext
 from sqlalchemy.orm import Session
+
 from database import get_db
 from models import User
 
@@ -34,7 +36,7 @@ def verify_password(plain: str, hashed: str) -> bool:
 
 def create_access_token(data: dict) -> str:
     to_encode = data.copy()
-    now = datetime.now(timezone.utc).replace(tzinfo=None)
+    now = datetime.now(UTC).replace(tzinfo=None)
     expire = now + timedelta(minutes=ACCESS_TOKEN_EXPIRE_MINUTES)
     to_encode.update({
         "exp": expire,
@@ -70,7 +72,9 @@ def get_current_user(
             raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="无效的 token")
     except JWTError:
         logger.warning("JWT 验证失败")
-        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="无效的 token")
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED, detail="无效的 token"
+        ) from None
     user = db.query(User).filter(User.id == user_id).first()
     if user is None:
         logger.warning(f"user_id={user_id} 对应的用户不存在")

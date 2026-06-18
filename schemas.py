@@ -1,5 +1,5 @@
+
 from pydantic import BaseModel
-from typing import Optional, List, Union
 
 
 class UserRegister(BaseModel):
@@ -28,27 +28,27 @@ class TokenResponse(BaseModel):
 
 class QuestionImport(BaseModel):
     type: str
-    chapter: Optional[str] = None
+    chapter: str | None = None
     content: str
-    options: Optional[List[str]] = None
-    answer: Union[str, List[str]]
-    analysis: Optional[str] = None
+    options: list[str] | None = None
+    answer: str | list[str]
+    analysis: str | None = None
 
 
 class BankImport(BaseModel):
     title: str
-    description: Optional[str] = None
-    questions: List[QuestionImport]
+    description: str | None = None
+    questions: list[QuestionImport]
 
 
 class QuestionOut(BaseModel):
     id: int
     type: str
-    chapter: Optional[str] = None
+    chapter: str | None = None
     content: str
-    options: Optional[str] = None
-    answer: Optional[str] = None
-    analysis: Optional[str] = None
+    options: str | None = None
+    answer: str | None = None
+    analysis: str | None = None
     sort_order: int
 
     class Config:
@@ -58,7 +58,7 @@ class QuestionOut(BaseModel):
 class BankOut(BaseModel):
     id: int
     title: str
-    description: Optional[str] = None
+    description: str | None = None
     question_count: int = 0
     created_at: str
     updated_at: str
@@ -68,16 +68,16 @@ class BankOut(BaseModel):
 
 
 class BankDetail(BankOut):
-    questions: List[QuestionOut] = []
+    questions: list[QuestionOut] = []
 
 
 class ExamStart(BaseModel):
-    bank_ids: List[int]
+    bank_ids: list[int]
     mode: str
-    types: Optional[List[str]] = None
-    question_count: Optional[int] = None
+    types: list[str] | None = None
+    question_count: int | None = None
     timer_mode: str = "per_question"
-    chapters: Optional[List[str]] = None
+    chapters: list[str] | None = None
     choice_timeout: int = 30
     judge_fill_timeout: int = 60
 
@@ -86,25 +86,25 @@ class ExamCurrent(BaseModel):
     exam_id: int
     current_index: int
     total_count: int
-    question: Optional[QuestionOut] = None
+    question: QuestionOut | None = None
     is_answered: bool = False
-    user_answer: Optional[str] = None
-    is_correct: Optional[bool] = None
-    correct_answer: Optional[str] = None
+    user_answer: str | None = None
+    is_correct: bool | None = None
+    correct_answer: str | None = None
 
 
 class AnswerSubmit(BaseModel):
     exam_id: int
     question_id: int
-    user_answer: Union[str, List[str], None] = None
+    user_answer: str | list[str] | None = None
     time_spent_seconds: int
 
 
 class AnswerResult(BaseModel):
     is_correct: bool
-    correct_answer: Union[str, List[str]]
-    analysis: Optional[str] = None
-    next_index: Optional[int] = None
+    correct_answer: str | list[str]
+    analysis: str | None = None
+    next_index: int | None = None
     is_last: bool = False
 
 
@@ -115,7 +115,7 @@ class ExamResult(BaseModel):
     wrong_count: int
     accuracy: float
     duration_seconds: int
-    answers: List[dict]
+    answers: list[dict]
 
 
 class HistoryItem(BaseModel):
@@ -137,11 +137,11 @@ class ImportResult(BaseModel):
     success: bool
     title: str
     question_count: int = 0
-    error: Optional[str] = None
+    error: str | None = None
 
 
 class BatchImportResponse(BaseModel):
-    results: List[ImportResult]
+    results: list[ImportResult]
 
 
 class DashboardData(BaseModel):
@@ -149,26 +149,26 @@ class DashboardData(BaseModel):
     total_questions: int = 0
     total_exams: int = 0
     average_accuracy: float = 0
-    recent_exams: List[HistoryItem] = []
+    recent_exams: list[HistoryItem] = []
 
 
 class ReviewFilter(BaseModel):
-    bank_ids: List[int]
-    types: Optional[List[str]] = None
-    chapters: Optional[List[str]] = None
+    bank_ids: list[int]
+    types: list[str] | None = None
+    chapters: list[str] | None = None
     show_reviewing_only: bool = False
 
 
 class ReviewQuestionOut(BaseModel):
     id: int
     type: str
-    chapter: Optional[str] = None
+    chapter: str | None = None
     content: str
-    options: Optional[str] = None
+    options: str | None = None
     answer: str
-    analysis: Optional[str] = None
+    analysis: str | None = None
     sort_order: int
-    review_status: Optional[str] = None
+    review_status: str | None = None
 
     class Config:
         from_attributes = True
@@ -193,27 +193,27 @@ class ExamProgress(BaseModel):
 
 class QuestionCreate(BaseModel):
     type: str
-    chapter: Optional[str] = None
+    chapter: str | None = None
     content: str
-    options: Optional[List[str]] = None
-    answer: Union[str, List[str]]
-    analysis: Optional[str] = None
+    options: list[str] | None = None
+    answer: str | list[str]
+    analysis: str | None = None
 
 
 class QuestionUpdate(BaseModel):
-    type: Optional[str] = None
-    chapter: Optional[str] = None
-    content: Optional[str] = None
-    options: Optional[List[str]] = None
-    answer: Optional[Union[str, List[str]]] = None
-    analysis: Optional[str] = None
+    type: str | None = None
+    chapter: str | None = None
+    content: str | None = None
+    options: list[str] | None = None
+    answer: str | list[str] | None = None
+    analysis: str | None = None
 
 
 class BankUpdate(BaseModel):
-    title: Optional[str] = None
-    description: Optional[str] = None
+    title: str | None = None
+    description: str | None = None
 
 
 class WrongAnswerStartRequest(BaseModel):
-    bank_ids: Optional[List[int]] = None
+    bank_ids: list[int] | None = None
     timer_mode: str = "per_question"

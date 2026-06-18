@@ -1,7 +1,6 @@
 from logging.config import fileConfig
 
-from sqlalchemy import engine_from_config
-from sqlalchemy import pool
+from sqlalchemy import engine_from_config, pool
 
 from alembic import context
 
@@ -14,8 +13,7 @@ config = context.config
 if config.config_file_name is not None:
     fileConfig(config.config_file_name)
 
-from database import Base, SQLALCHEMY_DATABASE_URL
-import models
+from database import SQLALCHEMY_DATABASE_URL, Base
 
 config.set_main_option("sqlalchemy.url", SQLALCHEMY_DATABASE_URL)
 

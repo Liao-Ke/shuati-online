@@ -1,10 +1,11 @@
 from fastapi import APIRouter, Depends
+from sqlalchemy import desc, func
 from sqlalchemy.orm import Session
-from sqlalchemy import func, desc
-from database import get_db
-from models import User, QuestionBank, ExamRecord, Question
-from schemas import DashboardData, HistoryItem
+
 from auth import get_current_user
+from database import get_db
+from models import ExamRecord, Question, QuestionBank, User
+from schemas import DashboardData, HistoryItem
 
 router = APIRouter(prefix="/api/dashboard", tags=["仪表盘"])
 

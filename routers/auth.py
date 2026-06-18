@@ -1,11 +1,13 @@
 import logging
+
 from fastapi import APIRouter, Depends, HTTPException, Request
 from sqlalchemy.orm import Session
+
+from auth import create_access_token, get_current_user, hash_password, verify_password
 from database import get_db
 from models import User
-from schemas import UserRegister, UserLogin, TokenResponse, UserInfo
-from auth import hash_password, verify_password, create_access_token, get_current_user
 from routers.limiter import limiter
+from schemas import TokenResponse, UserInfo, UserLogin, UserRegister
 
 logger = logging.getLogger("shuati")
 

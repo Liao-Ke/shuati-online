@@ -1,12 +1,12 @@
-import json
-from fastapi import APIRouter, Depends, HTTPException, Query
-from sqlalchemy.orm import Session
+from fastapi import APIRouter, Depends, Query
 from sqlalchemy import desc
-from database import get_db
-from models import User, ExamRecord
-from schemas import HistoryItem, ExamResult
+from sqlalchemy.orm import Session
+
 from auth import get_current_user
+from database import get_db
+from models import ExamRecord, User
 from routers.exam import exam_result as _exam_result
+from schemas import ExamResult, HistoryItem
 
 router = APIRouter(prefix="/api/history", tags=["练习历史"])
 
