@@ -49,7 +49,11 @@ docker compose logs -f
 ├── models.py               # ORM 模型（6 张表）
 ├── schemas.py              # Pydantic 请求/响应模型
 ├── auth.py                 # JWT + bcrypt + get_current_user
+├── logging_config.py       # 日志配置
+├── utils.py                # 工具函数（JSON 反序列化等）
 ├── requirements.txt        # 所有 Python 依赖
+├── alembic.ini             # Alembic 配置
+├── RULES.md                # 项目规则
 ├── test_integration.py     # 集成测试（单文件，TestClient）
 │
 ├── routers/                # 按功能拆分的路由模块
@@ -58,8 +62,15 @@ docker compose logs -f
 │   ├── exam.py             # 答题全流程
 │   ├── history.py          # 练习历史
 │   ├── dashboard.py        # 仪表盘统计
-│   ├── wrong_answers.py    # 错题本
-│   └── review.py           # 背题模式
+│   ├── wrong_answers.py    # 错题本 + 错题练习
+│   ├── review.py           # 背题模式
+│   ├── questions.py        # 题目 CURD
+│   └── limiter.py          # 登录限流
+│
+├── alembic/                # 数据库迁移
+│   ├── env.py
+│   └── versions/
+│       └── 519b18b6e049_initial_schema.py
 │
 ├── static/                 # 前端 SPA
 │   ├── index.html          # 入口，导航栏
@@ -69,20 +80,17 @@ docker compose logs -f
 │       └── app.js          # 路由 + 渲染 + 事件
 │
 ├── docs/                   # 文档
-│   ├── PRD.md
-│   ├── architecture.md
-│   ├── api-reference.md
-│   ├── deployment.md
-│   ├── frontend-style-guide.md
-│   ├── page-designs.md
-│   └── development-guide.md (本文件)
+│   ├── prd/                # PRD
+│   ├── arch/               # 架构描述
+│   ├── api/                # 接口文档
+│   ├── db/                 # 数据库设计
+│   ├── deploy/             # 部署方案
+│   ├── features/           # 功能实现说明
+│   └── designs/            # 设计稿
 │
-└── features/               # 功能实现说明
-    ├── exam-platform-v1.md
-    ├── exam-navigation.md
-    ├── question-count-selector.md
-    ├── review-mode.md
-    └── github-prepare.md
+└── landing/                # 产品落地页
+    ├── index.html
+    └── screenshots/
 ```
 
 ---
@@ -120,7 +128,14 @@ app.include_router(favorites.router)
 
 **3. 新增模型（如需新表）**
 
-在 `models.py` 中添加 ORM 类，重启后自动建表（前提是 `exam.db` 已删除或未冲突）。
+在 `models.py` 中添加 ORM 类，然后生成并应用迁移：
+
+```bash
+alembic revision --autogenerate -m "add favorites"
+alembic upgrade head
+```
+
+开发环境下 `uvicorn main:app` 启动时也会通过 `create_all()` 建表，但生产环境请始终使用迁移。
 
 **4. 新增 Schemas（如需新请求/响应）**
 
@@ -139,10 +154,12 @@ app.include_router(favorites.router)
 ### 修改数据库模型
 
 1. 修改 `models.py` 中的 ORM 类
-2. 删除 `exam.db`（已有的数据会丢失）
-3. 重启服务，ORM 自动重建表
+2. 生成自动迁移脚本：`alembic revision --autogenerate -m "描述"`
+3. 检查生成的版本文件（`alembic/versions/` 下）
+4. 应用迁移：`alembic upgrade head`
+5. 重启开发服务器
 
-如需保留数据：手动备份旧 db，写迁移脚本，或等引入 Alembic。
+数据自动保留，不需要删库。如果迁移脚本不满足需求（如重命名列、转换数据），可手动编辑生成的版本文件。
 
 ### 前端新增页面
 
@@ -154,7 +171,7 @@ app.include_router(favorites.router)
 ### 完成功能后
 
 1. 验证测试通过：`pytest test_integration.py -v`
-2. 在 `features/` 中新增 Markdown 文档，说明目标、修改范围、核心实现、影响范围、验证方式
+2. 在 `docs/features/` 中新增 Markdown 文档（按 CHANGELOG 模板），说明目标、修改范围、核心实现、验证方式
 
 ---
 
@@ -176,12 +193,29 @@ pytest test_integration.py -v
 ### 测试编写规范
 
 ```python
-# 每个测试步骤打印可读标记
-print(f'1. Register: {username}')
-r = client.post('/api/auth/register', json={'username': username, 'password': '123456'})
-assert r.status_code == 200, f"失败: {r.text}"
-token = r.json()['access_token']
-headers = {'Authorization': f'Bearer {token}'}
+# 使用 pytest fixtures 和模块级 State 传递共享数据
+class State:
+    token: str = ""
+    exam_id: int = 0
+
+@pytest.fixture(scope="session")
+def client():
+    from main import app
+    from fastapi.testclient import TestClient
+    return TestClient(app)
+
+@pytest.fixture(scope="session")
+def auth_headers(client):
+    """注册用户并返回认证头"""
+    import uuid
+    username = f"test_{uuid.uuid4().hex[:8]}"
+    r = client.post("/api/auth/register", json={"username": username, "password": "123456"})
+    assert r.status_code == 200
+    State.token = r.json()["access_token"]
+    return {"Authorization": f"Bearer {State.token}"}
+
+def test_example(auth_headers):
+    assert State.token is not None
 ```
 
 ### 手动测试
@@ -222,7 +256,7 @@ curl -X POST http://localhost:8000/api/auth/register \
 
 ### 前端规范
 
-详见 `docs/frontend-style-guide.md`，关键点：
+详见 `docs/designs/frontend-style-guide.md`，关键点：
 - 统一使用 Bootstrap 5 + Bootstrap Icons
 - 字体：Poppins（标题）/ Open Sans（正文）
 - Hash 路由，不依赖构建工具
@@ -244,14 +278,17 @@ def list_banks(user: User = Depends(get_current_user), db: Session = Depends(get
 ### JSON 字段处理
 
 ```python
+from utils import parse_json_field
+
 # 写入
 bank_ids_str = json.dumps([1, 2, 3])
 options_str = json.dumps(["A.1", "B.2"], ensure_ascii=False)
 
-# 读取
-bank_ids = json.loads(exam.bank_ids)
-is_list = question.answer.startswith("[")
-answer = json.loads(question.answer) if is_list else question.answer
+# 读取（统一使用 parse_json_field）
+bank_ids = parse_json_field(exam.bank_ids)
+options = parse_json_field(question.options)
+answer = parse_json_field(question.answer)
+user_answer = parse_json_field(record.user_answer)
 ```
 
 ### 事务与提交

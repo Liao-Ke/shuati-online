@@ -1,5 +1,8 @@
 # 替换已弃用的 `datetime.datetime.utcnow()`
 
+**日期：** 见文件修改时间  &emsp; **关联 PRD：** 无（基础设施/工具链）
+
+
 ## 目标
 
 消除全项目中所有已弃用的 `datetime.datetime.utcnow()` 调用，统一使用 naive UTC 时间戳，移除 Python 3.12+ 的 `DeprecationWarning`。

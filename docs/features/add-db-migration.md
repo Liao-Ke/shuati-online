@@ -1,5 +1,8 @@
 # 集成 Alembic 数据库迁移
 
+**日期：** 见文件修改时间  &emsp; **关联 PRD：** 无（基础设施/工具链）
+
+
 ## 目标
 
 引入 Alembic 管理数据库 schema 版本，替代仅靠 `Base.metadata.create_all` 的启动建表策略，支持后续增量迁移。

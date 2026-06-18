@@ -1,5 +1,8 @@
 # 新增多选题题型
 
+**日期：** 见文件修改时间  &emsp; **关联 PRD：** [exam-platform.md](../prd/exam-platform.md)
+
+
 ## 目标
 
 在原有 choice/fill/judge 三种题型基础上，新增 `multiple`（多选题）题型。

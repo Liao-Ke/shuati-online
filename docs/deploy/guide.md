@@ -113,17 +113,14 @@ nohup uvicorn main:app --host 0.0.0.0 --port 8000 > app.log 2>&1 &
 | 环境变量 | 默认值 | 说明 |
 |---------|--------|------|
 | `DATABASE_URL` | `sqlite:///./exam.db` | 数据库连接。Docker 下应为 `sqlite:///./data/exam.db` |
-| `SECRET_KEY` | `exam-platform-secret-key-change-in-production` | JWT 签名密钥 |
+| `SECRET_KEY` | **无默认值（生产环境必须设置）** | JWT 签名密钥，通过 `docker-compose.yml` 或环境变量注入 |
 
-### 生产环境必须修改
+### 生产环境必须设置
 
 ```bash
-# Docker
-docker run -e SECRET_KEY="your-random-secret-here" ...
-
-# docker-compose.yml
-environment:
-  - SECRET_KEY="your-random-secret-here"
+# Docker（docker-compose.yml 中已有 ${SECRET_KEY:?...}，启动前需 export）
+export SECRET_KEY="your-random-secret-here"
+docker compose up -d
 
 # 本地
 export SECRET_KEY="your-random-secret-here"
@@ -147,20 +144,49 @@ python -c "import secrets; print(secrets.token_hex(32))"
 | 本地运行 | 项目目录下的 `exam.db` |
 | Docker | volume `shuati-data` 中的 `exam.db`，容器内 `/app/data/exam.db` |
 
-### 重建数据库
+### Alembic 迁移
 
-项目无迁移系统，修改模型后需删库重建：
+项目使用 Alembic 管理数据库 schema 版本。Docker 启动时自动执行 `alembic upgrade head`，开发环境通过 `uvicorn main:app` 启动时仍保留 `Base.metadata.create_all()` 作为兜底。
+
+#### 运行迁移
+
+```bash
+# 手动执行迁移（本地开发）
+alembic upgrade head
+
+# 回滚一步
+alembic downgrade -1
+
+# 查看当前版本
+alembic current
+
+# 查看迁移历史
+alembic history
+```
+
+#### 生成新的迁移
+
+修改 `models.py` 后，生成自动迁移脚本：
+
+```bash
+alembic revision --autogenerate -m "描述性名称"
+```
+
+检查生成的版本文件后，执行 `alembic upgrade head` 应用迁移。
+
+#### 重建数据库（开发环境）
 
 ```bash
 # 本地
 rm exam.db
+alembic upgrade head
 uvicorn main:app --reload --host 0.0.0.0 --port 8000
-# 启动时会自动建表
 
 # Docker
 docker compose down
 docker volume rm shuati-data
 docker compose up -d
+# 启动时自动执行 alembic upgrade head
 ```
 
 ### WAL 模式（可选优化）
@@ -189,14 +215,14 @@ def set_sqlite_pragma(dbapi_connection, connection_record):
 git pull
 docker compose build
 docker compose up -d
+# 数据库迁移在容器启动时自动执行 alembic upgrade head
 
 # 本地
 git pull
 pip install -r requirements.txt
+alembic upgrade head          # 如有模型变更则自动迁移
 uvicorn main:app --host 0.0.0.0 --port 8000
 ```
-
-数据库无迁移脚本。如果模型变更，按"重建数据库"步骤操作。
 
 ---
 
@@ -227,16 +253,19 @@ docker compose logs
 
 ### Q: 数据库迁移怎么做？
 
-目前没有迁移系统。修改 `models.py` 后需要删库重建。如果已有数据需要保留，建议先备份：
+项目使用 Alembic 管理 schema 迁移。修改 `models.py` 后：
 
 ```bash
-cp exam.db exam.db.bak
-# 修改模型后删库
-rm exam.db
-# 启动（自动建新表）
-uvicorn main:app ...
-# 如果需要导回数据：暂无官方工具，需自行编写脚本
+# 1. 生成迁移脚本
+alembic revision --autogenerate -m "修改说明"
+
+# 2. 检查生成的版本文件（alembic/versions/ 下）
+
+# 3. 应用迁移
+alembic upgrade head
 ```
+
+已有数据会自动保留，不需要删库。如果迁移脚本不满足需求（如重命名列），可手动编辑版本文件。详见 `docs/db/schema.md`。
 
 ### Q: 如何修改端口？
 

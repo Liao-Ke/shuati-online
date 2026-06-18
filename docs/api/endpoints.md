@@ -41,6 +41,8 @@
 
 ### POST /api/auth/login
 
+登录接口按客户端 IP 限流：**每分钟最多 5 次请求**，超过后返回 429。
+
 **请求体：**
 ```json
 {
@@ -51,7 +53,7 @@
 
 **响应 (200)：** 同 register
 
-**错误：** 401 — 用户名或密码错误
+**错误：** 401 — 用户名或密码错误；429 — 请求过于频繁，请稍后重试
 
 ---
 
@@ -333,6 +335,7 @@
   "types": ["choice", "fill", "judge"],
   "question_count": null,
   "timer_mode": "per_question",
+  "chapters": null,
   "choice_timeout": 30,
   "judge_fill_timeout": 60
 }
@@ -345,6 +348,7 @@
 | `types` | 题型筛选，缺省返回全部 |
 | `question_count` | 随机抽取题数，null 或 ≥ 可用题数则全部 |
 | `timer_mode` | `"per_question"` 单题计时 / `"elapsed"` 整卷计时 |
+| `chapters` | 章节筛选（数组），缺省返回全部章节 |
 | `choice_timeout` | 选择题倒计时秒数（per_question 模式，默认 30） |
 | `judge_fill_timeout` | 填空/判断题倒计时秒数（默认 60） |
 
@@ -450,6 +454,7 @@
 - 填空题单空：字符串（如 `"北京"`）
 - 填空题多空：字符串数组（如 `["造纸术", "印刷术", "火药", "指南针"]`）
 - 判断题：`"对"` 或 `"错"`
+- 多选题：选项字母数组（如 `["A", "C"]`）
 
 **响应 (200)：**
 ```json
@@ -652,7 +657,7 @@
 {
   "bank_ids": [1, 2],
   "types": ["choice", "fill"],
-  "chapter": "第一章",
+  "chapters": ["第一章"],
   "show_reviewing_only": false
 }
 ```
@@ -661,7 +666,7 @@
 |------|------|
 | `bank_ids` | 必填 |
 | `types` | 筛选题型，缺省返回全部 |
-| `chapter` | 精确筛选章节，缺省返回全部 |
+| `chapters` | 章节筛选（数组，支持多选），缺省返回全部章节 |
 | `show_reviewing_only` | 为 `true` 时排除 `status == "known"` 的题目 |
 
 **响应 (200)：**
@@ -718,6 +723,55 @@
   "total_reviewed": 8
 }
 ```
+
+---
+
+### POST /api/review/chapters
+
+获取所选题库的章节列表（去重），用于背题模式中的章节多选筛选。
+
+**请求体：**
+```json
+{
+  "bank_ids": [1, 2]
+}
+```
+
+**响应 (200)：**
+```json
+["第一章", "第二章", "第三章"]
+```
+
+---
+
+## 错题练习
+
+### POST /api/wrong-answers/start
+
+从错题本中筛选错题，创建一场错题练习。
+
+**请求体：**
+```json
+{
+  "bank_ids": [1],
+  "timer_mode": "per_question"
+}
+```
+
+| 字段 | 说明 |
+|------|------|
+| `bank_ids` | 可选，指定题库范围；缺省则包含所有错题 |
+| `timer_mode` | `"per_question"` 或 `"elapsed"`，默认 `"per_question"` |
+
+**响应 (200)：**
+```json
+{
+  "exam_id": 43,
+  "total_count": 8
+}
+```
+
+**错误：** 400 — 没有错题 / 所选题库中没有错题
 
 ---
 

@@ -1,5 +1,8 @@
 # 集成测试转换为 pytest 格式
 
+**日期：** 见文件修改时间  &emsp; **关联 PRD：** 无（基础设施/工具链）
+
+
 ## 目标
 
 将 `test_integration.py` 从脚本风格（`python test_integration.py`）转换为标准 pytest test function 格式（`pytest test_integration.py -v`），使其兼容 pytest 的 fixture、测试选择和 CI 集成能力。

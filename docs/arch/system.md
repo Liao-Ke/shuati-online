@@ -21,11 +21,13 @@
 
 | 文件 | 职责 |
 |------|------|
-| `main.py` | FastAPI 入口，`Base.metadata.create_all()` 自动建表，挂载 7 个路由和静态文件 |
+| `main.py` | FastAPI 入口，`Base.metadata.create_all()` 自动建表，挂载 8 个路由和静态文件 |
 | `database.py` | SQLAlchemy engine + SessionLocal + `get_db` 依赖注入 |
 | `models.py` | 6 个 ORM 模型，全项目唯一的数据层 |
 | `schemas.py` | Pydantic 请求/响应模型，不含业务逻辑 |
 | `auth.py` | JWT 签发/验证、密码 hash、`get_current_user` 依赖 |
+| `logging_config.py` | 日志配置（结构化的 JSON 日志） |
+| `utils.py` | 工具函数，含 `parse_json_field()` JSON 反序列化 |
 
 ### 后端路由
 
@@ -39,6 +41,7 @@
 | `routers/wrong_answers.py` | 错题列表，按题库分组，去重 |
 | `routers/review.py` | 背题模式：筛选题目、标记掌握状态、统计 |
 | `routers/questions.py` | 题目 CURD：新增、编辑、删除单道题目 |
+| `routers/limiter.py` | 登录限流（基于 IP 的失败计数与锁定） |
 
 ### 前端
 
@@ -69,7 +72,7 @@
                     │───────────────────────│
                     │ id (PK)               │
                     │ bank_id (FK)          │
-                    │ type (choice/fill/judge)│
+                    │ type (choice/fill/judge/multiple)│
                     │ chapter, content       │
                     │ options (JSON str|null)│
                     │ answer (str/JSON str)  │
@@ -86,11 +89,11 @@
    │ user_id (FK)        │──│ exam_id (FK) │  │ user_id (FK) │
    │ bank_ids (JSON str) │  │ question_id  │  │ question_id  │
    │ mode (seq/random)   │  │ user_answer  │  │ status       │
-   │ question_count      │  │ is_correct   │  │ review_count │
-   │ question_ids (JSON) │  │ time_spent   │  │ (uq: user_id │
-   │ status (in_progress │  └──────────────┘  │  + question) │
-   │  /completed)        │                    └──────────────┘
-   │ timer_mode          │
+   │ question_count      │  │ is_correct   │  │ reviewed_at  │
+   │ question_ids (JSON) │  │ time_spent   │  │ review_count │
+   │ status (in_progress │  └──────────────┘  │  (uq: user_id │
+   │  /completed)        │                    │  + question) │
+   │ timer_mode          │                    └──────────────┘
    └─────────────────────┘
 ```
 
@@ -157,11 +160,13 @@ GET /api/review/stats       ─→ 汇总 known / reviewing 数量
 提交答案 (is_correct=False)
   → AnswerRecord 写入数据库
   → GET /api/wrong-answers
-    → 查询所有 is_correct=False 的 AnswerRecord
-    → JOIN Question 获取题目内容
-    → 按 question_id 去重（保留最近一次）
-    → 按题库名称分组返回
+    → 子查询 MAX(answered_at) GROUP BY question_id 获取每题最新作答时间
+    → JOIN 最新作答记录，过滤 is_correct == False
+    → 按 question_id 去重（每题仅保留最近一次作答结果）
+    → 仅最近一次答错才算错题（答对后自动从错题本消失）
 ```
+
+错题练习复用同一判定逻辑（`_get_wrong_question_ids` 共用函数），`POST /api/wrong-answers/start` 创建 ExamRecord 后跳转到常规答题流程。
 
 ### 4.4 出题逻辑
 
@@ -238,9 +243,6 @@ if question_ids: 过滤到选中的子集
 | 问题 | 影响 | 可能方案 |
 |------|------|----------|
 | SQLite 不支持并发写 | 多个请求同时写数据库可能报错 | SQLite WAL 模式 / 切换到 PostgreSQL |
-| `SECRET_KEY` 硬编码默认值 | 生产环境存在密钥泄露风险 | 已支持环境变量覆盖，需文档提示 |
 | 答题中途退出不保存 | 浏览器关闭或刷新后进行中的答题丢失 | 支持暂停/恢复（前端 localStorage + 后端保存状态） |
-| 无迁移系统 | 修改模型后需删库重建 | 引入 Alembic |
-| 章节筛选为精确匹配 | 背题模式不支持多选或模糊筛选 | 支持 LIKE 查询或标签系统 |
 | 前端全局变量管理 | 页面复杂后状态容易混乱 | 引入简单的状态管理器 |
 | 仅支持题库 JSON 导出 | 不支持答题记录导出或 CSV 格式 | 添加 CSV/批量导出接口 |

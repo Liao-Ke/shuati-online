@@ -93,15 +93,17 @@ docker compose up -d
 | `/api/review/questions` | POST | 背题列表 |
 | `/api/review/mark` | POST | 标记掌握状态 |
 | `/api/review/stats` | GET | 背题统计 |
+| `/api/review/chapters` | POST | 获取章节列表（用于筛选） |
 | `/api/wrong-answers` | GET | 错题本 |
+| `/api/wrong-answers/start` | POST | 错题练习 |
 | `/api/dashboard` | GET | 首页统计 |
 
 ## 配置
 
 | 环境变量 | 默认值 | 说明 |
 |---------|--------|------|
-| `DATABASE_URL` | `sqlite:///./exam.db` | 数据库连接 |
-| `SECRET_KEY` | `exam-platform-secret-key-change-in-production` | JWT 密钥（生产环境请修改） |
+| `DATABASE_URL` | `sqlite:///./exam.db` | 数据库连接。Docker 下为 `sqlite:///./data/exam.db` |
+| `SECRET_KEY` | **无默认值（生产环境必须设置）** | JWT 签名密钥，通过环境变量注入 |
 
 ## 题库格式
 
@@ -141,6 +143,21 @@ docker compose up -d
   ]
 }
 ```
+
+## 相关文档
+
+| 文档 | 位置 | 说明 |
+|------|------|------|
+| 产品需求文档 | [docs/prd/exam-platform.md](docs/prd/exam-platform.md) | 功能定义与验收标准 |
+| 架构描述 | [docs/arch/system.md](docs/arch/system.md) | 模块职责、ER 关系、数据流 |
+| 接口文档 | [docs/api/endpoints.md](docs/api/endpoints.md) | 完整 API 参考 |
+| 数据库设计 | [docs/db/schema.md](docs/db/schema.md) | 表结构、索引、设计决策 |
+| 部署方案 | [docs/deploy/guide.md](docs/deploy/guide.md) | Docker/本地部署、环境配置 |
+| 开发指南 | [docs/designs/development-guide.md](docs/designs/development-guide.md) | 环境搭建、开发流程、代码规范 |
+| 前端设计稿 | [docs/designs/page-designs.md](docs/designs/page-designs.md) | 所有页面的布局与交互 |
+| 前端风格指南 | [docs/designs/frontend-style-guide.md](docs/designs/frontend-style-guide.md) | 色彩、字体、组件规范 |
+| 项目规则 | [RULES.md](RULES.md) | 技术栈约束、代码规范、反模式 |
+| 功能记录（CHANGELOG） | [docs/features/](docs/features/) | 每次功能实现的修改范围与验证 |
 
 ## 许可证
 

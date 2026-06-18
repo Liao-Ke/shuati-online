@@ -1,5 +1,8 @@
 # 登录接口速率限制
 
+**日期：** 见文件修改时间  &emsp; **关联 PRD：** [exam-platform.md](../prd/exam-platform.md)
+
+
 ## 目标
 
 防止暴力破解密码攻击。`POST /api/auth/login` 接口按客户端 IP 限流，每分钟最多 5 次请求。
