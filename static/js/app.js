@@ -355,6 +355,19 @@ router.add('/exam/setup', async () => {
         </div>
       </div></div>
       <div class="card mb-4"><div class="card-body">
+        <h5>章节筛选 <small class="text-muted">（可选，不选则显示全部）</small></h5>
+        <div id="exam-chapter-area" style="display:none">
+          <div class="mb-1">
+            <a href="#" class="text-decoration-none me-2" id="exam-chapter-select-all">全选</a>
+            <a href="#" class="text-decoration-none" id="exam-chapter-deselect-all">取消全选</a>
+          </div>
+          <div id="exam-chapter-list" class="border rounded p-2" style="max-height:180px;overflow-y:auto">
+            <span class="text-muted">请先选择题库</span>
+          </div>
+          <p class="mt-1 mb-0 text-muted small" id="exam-chapter-count"></p>
+        </div>
+      </div></div>
+      <div class="card mb-4"><div class="card-body">
         <h5>题目数量</h5>
         <div class="mt-2">
           <label class="d-flex align-items-center gap-2 mb-2">
@@ -405,6 +418,10 @@ router.add('/exam/setup', async () => {
       document.getElementById('selected-count').textContent = '已选 1 个题库';
     }
     updateQuestionCount();
+    document.getElementById('exam-chapter-select-all')?.addEventListener('click', (e) => { e.preventDefault(); selectAllExamChapters(); });
+    document.getElementById('exam-chapter-deselect-all')?.addEventListener('click', (e) => { e.preventDefault(); deselectAllExamChapters(); });
+    // 首次加载章节
+    updateExamChapters();
   } catch {
     render('<div class="alert alert-danger">加载失败</div>');
   }
@@ -686,6 +703,7 @@ router.add('/wrong-answers', async () => {
 
 let reviewQuestions = [];
 let reviewFilter = null;
+let allChapters = [];
 
 router.add('/review/setup', async () => {
   sessionStorage.removeItem('reviewFilter');
@@ -714,10 +732,18 @@ router.add('/review/setup', async () => {
         </div>
       </div></div>
       <div class="card mb-4"><div class="card-body">
-        <h5>章节筛选 <small class="text-muted">（可选）</small></h5>
-        <select class="form-select" id="review-chapter-select">
-          <option value="">全部章节</option>
-        </select>
+        <h5>章节筛选 <small class="text-muted">（可选，不选则显示全部）</small></h5>
+        <div id="review-chapter-area" style="display:none">
+
+          <div class="mb-1">
+            <a href="#" class="text-decoration-none me-2" onclick="selectAllChapters(event)">全选</a>
+            <a href="#" class="text-decoration-none" onclick="deselectAllChapters(event)">取消全选</a>
+          </div>
+          <div id="review-chapter-list" class="border rounded p-2" style="max-height:180px;overflow-y:auto">
+            <span class="text-muted">请先选择题库</span>
+          </div>
+          <p class="mt-1 mb-0 text-muted small" id="review-chapter-count"></p>
+        </div>
       </div></div>
       <div class="card mb-4"><div class="card-body">
         <div class="form-check">
@@ -745,6 +771,7 @@ router.add('/review/setup', async () => {
       firstCard.classList.add('selected');
       firstCard.querySelector('.review-bank-checkbox').checked = true;
       document.getElementById('review-selected-count').textContent = '已选 1 个题库';
+      updateReviewChapters();
     }
   } catch {
     render('<div class="alert alert-danger">加载失败</div>');
@@ -757,15 +784,115 @@ function toggleReviewBankSelect(el) {
   el.classList.toggle('selected');
   const count = document.querySelectorAll('.review-bank-checkbox:checked').length;
   document.getElementById('review-selected-count').textContent = `已选 ${count} 个题库`;
+  updateReviewChapters();
+}
+
+async function updateReviewChapters() {
+  const selectedIds = [...document.querySelectorAll('.review-bank-checkbox:checked')].map(cb => parseInt(cb.value));
+  const area = document.getElementById('review-chapter-area');
+  const list = document.getElementById('review-chapter-list');
+  if (!area || !list) return;
+  if (selectedIds.length === 0) {
+    area.style.display = 'none';
+    return;
+  }
+  area.style.display = '';
+  try {
+    allChapters = await api.getReviewChapters({ bank_ids: selectedIds });
+  } catch { allChapters = []; }
+  renderChapterCheckboxes(allChapters);
+}
+
+function renderChapterCheckboxes(chapters) {
+  const list = document.getElementById('review-chapter-list');
+  const countEl = document.getElementById('review-chapter-count');
+  if (chapters.length === 0) {
+    list.innerHTML = '<span class="text-muted">题库中没有章节</span>';
+    if (countEl) countEl.textContent = '';
+    return;
+  }
+  list.innerHTML = chapters.map(c =>
+    `<label class="d-block chapter-label"><input type="checkbox" class="form-check-input me-1 review-chapter-filter" value="${escHtml(c)}"> ${escHtml(c)}</label>`
+  ).join('');
+  updateChapterCount();
+}
+
+
+function selectAllChapters(e) {
+  e.preventDefault();
+  document.querySelectorAll('#review-chapter-list .review-chapter-filter').forEach(cb => { cb.checked = true; });
+  updateChapterCount();
+}
+
+function deselectAllChapters(e) {
+  e.preventDefault();
+  document.querySelectorAll('#review-chapter-list .review-chapter-filter').forEach(cb => { cb.checked = false; });
+  updateChapterCount();
+}
+
+function updateChapterCount() {
+  const count = document.querySelectorAll('.review-chapter-filter:checked').length;
+  const el = document.getElementById('review-chapter-count');
+  if (el) el.textContent = count > 0 ? `已选 ${count} 个章节` : '';
+}
+
+/* ---- 答题模式章节筛选 ---- */
+
+let examChapters = [];
+
+async function updateExamChapters() {
+  const selectedIds = [...document.querySelectorAll('.bank-checkbox:checked')].map(cb => parseInt(cb.value));
+  const area = document.getElementById('exam-chapter-area');
+  const list = document.getElementById('exam-chapter-list');
+  if (!area || !list) return;
+  if (selectedIds.length === 0) {
+    area.style.display = 'none';
+    return;
+  }
+  area.style.display = '';
+  try {
+    examChapters = await api.getReviewChapters({ bank_ids: selectedIds });
+  } catch { examChapters = []; }
+  renderExamChapterCheckboxes(examChapters);
+}
+
+function renderExamChapterCheckboxes(chapters) {
+  const list = document.getElementById('exam-chapter-list');
+  const countEl = document.getElementById('exam-chapter-count');
+  if (chapters.length === 0) {
+    list.innerHTML = '<span class="text-muted">题库中没有章节</span>';
+    if (countEl) countEl.textContent = '';
+    return;
+  }
+  list.innerHTML = chapters.map(c =>
+    `<label class="d-block chapter-label"><input type="checkbox" class="form-check-input me-1 exam-chapter-filter" value="${escHtml(c)}"> ${escHtml(c)}</label>`
+  ).join('');
+  updateExamChapterCount();
+}
+
+function selectAllExamChapters() {
+  document.querySelectorAll('#exam-chapter-list .exam-chapter-filter').forEach(cb => { cb.checked = true; });
+  updateExamChapterCount();
+}
+
+function deselectAllExamChapters() {
+  document.querySelectorAll('#exam-chapter-list .exam-chapter-filter').forEach(cb => { cb.checked = false; });
+  updateExamChapterCount();
+}
+
+function updateExamChapterCount() {
+  const count = document.querySelectorAll('.exam-chapter-filter:checked').length;
+  const el = document.getElementById('exam-chapter-count');
+  if (el) el.textContent = count > 0 ? `已选 ${count} 个章节` : '';
 }
 
 async function startReview() {
   const selectedBanks = [...document.querySelectorAll('.review-bank-checkbox:checked')].map(cb => parseInt(cb.value));
   if (selectedBanks.length === 0) { alert('请至少选择一个题库'); return; }
   const types = [...document.querySelectorAll('.review-type-filter:checked')].map(cb => cb.value);
-  const chapter = document.getElementById('review-chapter-select').value || null;
+  const chapters = [...document.querySelectorAll('.review-chapter-filter:checked')].map(cb => cb.value);
   const showReviewingOnly = document.getElementById('review-show-reviewing').checked;
-  reviewFilter = { bank_ids: selectedBanks, types, chapter, show_reviewing_only: showReviewingOnly };
+  reviewFilter = { bank_ids: selectedBanks, types, chapters: chapters.length > 0 ? chapters : null, show_reviewing_only: showReviewingOnly };
   sessionStorage.setItem('reviewFilter', JSON.stringify(reviewFilter));
   router.navigate('/review');
 }
@@ -985,6 +1112,7 @@ function toggleBankSelect(el) {
   const count = document.querySelectorAll('.bank-checkbox:checked').length;
   document.getElementById('selected-count').textContent = `已选 ${count} 个题库`;
   updateQuestionCount();
+  updateExamChapters();
 }
 
 async function startExam() {
@@ -997,8 +1125,9 @@ async function startExam() {
   const timerMode = document.querySelector('[data-timer].active')?.dataset.timer || 'per_question';
   const choiceTimeout = parseInt(document.getElementById('timeout-choice').value) || 30;
   const fillTimeout = parseInt(document.getElementById('timeout-fill').value) || 60;
+  const chapters = [...document.querySelectorAll('.exam-chapter-filter:checked')].map(cb => cb.value);
   try {
-    const res = await api.startExam({ bank_ids: selectedBanks, mode, types, question_count: questionCount, timer_mode: timerMode, choice_timeout: choiceTimeout, judge_fill_timeout: fillTimeout });
+    const res = await api.startExam({ bank_ids: selectedBanks, mode, types, chapters: chapters.length > 0 ? chapters : null, question_count: questionCount, timer_mode: timerMode, choice_timeout: choiceTimeout, judge_fill_timeout: fillTimeout });
     examId = res.exam_id;
     examTotalCount = res.total_count;
     examTimerMode = res.timer_mode;
@@ -1085,7 +1214,9 @@ async function loadQuestionByIndex(index) {
     if (data.is_answered) {
       const icon = data.is_correct ? '<span class="text-success">\u2713</span>' : '<span class="text-danger">\u2717</span>';
       const feedbackClass = data.is_correct ? 'feedback-correct' : 'feedback-wrong';
-      document.getElementById('exam-timer').textContent = '';
+      if (examTimerMode !== 'elapsed') {
+        document.getElementById('exam-timer').textContent = '';
+      }
 
       let answeredOptionsHtml = '';
       if (q.type === 'choice' || q.type === 'multiple') {

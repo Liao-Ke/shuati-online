@@ -1,4 +1,5 @@
 from fastapi import APIRouter, Depends, HTTPException
+from pydantic import BaseModel
 from sqlalchemy.orm import Session
 from database import get_db
 from models import User, QuestionBank, Question, ReviewRecord, utcnow
@@ -33,8 +34,8 @@ def get_review_questions(
     query = db.query(Question).filter(Question.bank_id.in_(bank_ids))
     if data.types:
         query = query.filter(Question.type.in_(data.types))
-    if data.chapter:
-        query = query.filter(Question.chapter == data.chapter)
+    if data.chapters:
+        query = query.filter(Question.chapter.in_(data.chapters))
 
     questions = query.order_by(Question.bank_id, Question.sort_order, Question.id).all()
     if not questions:
@@ -55,6 +56,31 @@ def get_review_questions(
         result.append(_get_question_out(q, status))
 
     return result
+
+
+class _ChaptersRequest(BaseModel):
+    bank_ids: list[int]
+
+
+@router.post("/chapters")
+def get_chapters(
+    data: _ChaptersRequest,
+    user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    banks = db.query(QuestionBank).filter(
+        QuestionBank.id.in_(data.bank_ids),
+        QuestionBank.user_id == user.id,
+    ).all()
+    if not banks:
+        return []
+    bank_ids = [b.id for b in banks]
+    rows = db.query(Question.chapter).filter(
+        Question.bank_id.in_(bank_ids),
+        Question.chapter.isnot(None),
+        Question.chapter != "",
+    ).distinct().order_by(Question.chapter).all()
+    return [r[0] for r in rows]
 
 
 @router.post("/mark")

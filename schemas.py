@@ -77,6 +77,7 @@ class ExamStart(BaseModel):
     types: Optional[List[str]] = None
     question_count: Optional[int] = None
     timer_mode: str = "per_question"
+    chapters: Optional[List[str]] = None
     choice_timeout: int = 30
     judge_fill_timeout: int = 60
 
@@ -154,7 +155,7 @@ class DashboardData(BaseModel):
 class ReviewFilter(BaseModel):
     bank_ids: List[int]
     types: Optional[List[str]] = None
-    chapter: Optional[str] = None
+    chapters: Optional[List[str]] = None
     show_reviewing_only: bool = False
 
 

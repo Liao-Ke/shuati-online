@@ -704,3 +704,13 @@ h1, h2, h3, h4, h5, h6 {
   color: var(--text-primary);
   margin-bottom: 1.5rem;
 }
+
+.chapter-label {
+  cursor: pointer;
+  padding: 2px 4px;
+  border-radius: 4px;
+  margin-bottom: 1px;
+}
+.chapter-label:hover {
+  background: #f0f0f0;
+}

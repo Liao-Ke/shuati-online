@@ -97,6 +97,7 @@ const api = {
   getDashboard() { return this.get('/dashboard'); },
 
   getReviewQuestions(data) { return this.post('/review/questions', data); },
+  getReviewChapters(data) { return this.post('/review/chapters', data); },
   markReview(questionId, status) { return this.post('/review/mark', { question_id: questionId, status }); },
   getReviewStats() { return this.get('/review/stats'); },
 };
