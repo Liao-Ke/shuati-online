@@ -1,0 +1,100 @@
+name: Bug 报告
+description: 报告一个 Bug，帮助我们修复问题
+title: "[Bug] "
+labels: ["bug"]
+body:
+  - type: checkboxes
+    id: existing
+    attributes:
+      label: 是否已存在类似 Issue？
+      description: 请先搜索是否已有相同问题的 Issue
+      options:
+        - label: 我已搜索过现有 Issue
+          required: true
+  - type: textarea
+    id: description
+    attributes:
+      label: Bug 描述
+      description: 简要描述遇到的问题
+      placeholder: 描述你遇到的 Bug...
+    validations:
+      required: true
+  - type: textarea
+    id: reproduce
+    attributes:
+      label: 复现步骤
+      description: 详细描述如何复现这个问题
+      placeholder: |
+        1. 进入页面 '...'
+        2. 点击 '...'
+        3. 执行操作 '...'
+        4. 出现错误
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: 期望行为
+      description: 描述你期望发生的正确行为
+      placeholder: 期望的行为是...
+    validations:
+      required: true
+  - type: dropdown
+    id: question-type
+    attributes:
+      label: 涉及的题型
+      description: 如果与特定题型相关，请选择
+      multiple: true
+      options:
+        - choice（选择题）
+        - fill（填空题）
+        - judge（判断题）
+        - 全部题型
+        - 不涉及
+  - type: dropdown
+    id: exam-mode
+    attributes:
+      label: 涉及的答题模式
+      description: 如果与特定答题模式相关，请选择
+      multiple: true
+      options:
+        - sequential（顺序模式）
+        - random（随机模式）
+        - 不涉及
+  - type: dropdown
+    id: browser
+    attributes:
+      label: 浏览器
+      description: 在哪个浏览器中遇到问题？
+      multiple: true
+      options:
+        - Chrome
+        - Firefox
+        - Safari
+        - Edge
+        - 其他
+  - type: dropdown
+    id: deploy
+    attributes:
+      label: 部署方式
+      description: 你使用的是哪种部署方式？
+      options:
+        - 本地运行
+        - Docker
+        - 其他
+  - type: textarea
+    id: logs
+    attributes:
+      label: 相关日志
+      description: 粘贴错误日志或控制台输出（自动格式化为代码）
+      render: shell
+  - type: textarea
+    id: screenshots
+    attributes:
+      label: 截图
+      description: 如果适用，添加截图帮助说明问题。可以直接拖拽图片到此区域。
+  - type: textarea
+    id: additional
+    attributes:
+      label: 附加信息
+      description: 添加其他有助于排查的信息
