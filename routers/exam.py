@@ -324,6 +324,8 @@ def exam_result(exam_id: int, user: User = Depends(get_current_user), db: Sessio
     ).first()
     if not exam:
         raise HTTPException(status_code=404, detail="练习不存在")
+    if exam.status != "completed":
+        raise HTTPException(status_code=409, detail="考试尚未结束，无法查看结果")
 
     answers = db.query(AnswerRecord).filter(
         AnswerRecord.exam_id == exam.id
