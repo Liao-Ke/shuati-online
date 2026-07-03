@@ -15,7 +15,8 @@ router = APIRouter(prefix="/api/auth", tags=["认证"])
 
 
 @router.post("/register", response_model=TokenResponse)
-def register(data: UserRegister, db: Session = Depends(get_db)):
+@limiter.limit("5/minute")
+def register(data: UserRegister, request: Request, db: Session = Depends(get_db)):
     if len(data.username) < 2:
         raise HTTPException(status_code=400, detail="用户名至少 2 个字符")
     if len(data.password) < 6:

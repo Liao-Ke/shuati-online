@@ -1,6 +1,7 @@
 import json
 import logging
 import random
+import zlib
 
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
@@ -38,8 +39,7 @@ def _load_all_exam_questions(exam: ExamRecord, db: Session) -> tuple[list[Questi
         all_questions = [q for q in all_questions if q.id in selected_ids]
 
     if exam.mode == "random":
-        random.seed(exam.id)
-        random.shuffle(all_questions)
+        random.Random(exam.id).shuffle(all_questions)
     else:
         all_questions.sort(key=lambda q: (q.bank_id or 0, q.sort_order or 0, q.id or 0))
 
@@ -75,8 +75,9 @@ def start_exam(data: ExamStart, user: User = Depends(get_current_user), db: Sess
         raise HTTPException(status_code=400, detail="没有符合条件的题目")
 
     if data.question_count and data.question_count < len(questions):
-        random.seed(user.id + hash(str(data.bank_ids)) + (data.question_count or 0))
-        selected = random.sample(questions, data.question_count)
+        # hash() 默认随机化会导致重启后抽题结果不一致，改用 crc32 确保确定性种子。
+        seed = user.id + zlib.crc32(str(data.bank_ids).encode()) + (data.question_count or 0)
+        selected = random.Random(seed).sample(questions, data.question_count)
         question_ids = [q.id for q in selected]
     else:
         selected = questions
@@ -182,6 +183,20 @@ def submit_answer(data: AnswerSubmit, user: User = Depends(get_current_user), db
     ).first()
     if not exam:
         raise HTTPException(status_code=404, detail="练习不存在")
+
+    if exam.status == "completed":
+        raise HTTPException(status_code=400, detail="考试已结束，无法提交答案")
+
+    if exam.question_ids:
+        valid_ids = set(parse_json_field(exam.question_ids))
+        if data.question_id not in valid_ids:
+            raise HTTPException(status_code=400, detail="该题目不属于本次考试")
+
+    existing = db.query(AnswerRecord).filter(
+        AnswerRecord.exam_id == exam.id, AnswerRecord.question_id == data.question_id
+    ).first()
+    if existing:
+        raise HTTPException(status_code=400, detail="该题目已作答，不可重复提交")
 
     question = db.query(Question).filter(Question.id == data.question_id).first()
     if not question:

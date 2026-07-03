@@ -21,10 +21,12 @@ app = FastAPI(title="刷题在线", version="1.0.0")
 logger.info("服务启动")
 
 cors_origins = os.getenv("CORS_ORIGINS", "*")
+is_wildcard = cors_origins == "*"
+# CORS 规范禁止 Access-Control-Allow-Origin: * 与 credentials 同时使用，故通配时关闭 credentials。
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=cors_origins.split(",") if cors_origins != "*" else ["*"],
-    allow_credentials=True,
+    allow_origins=["*"] if is_wildcard else cors_origins.split(","),
+    allow_credentials=not is_wildcard,
     allow_methods=["*"],
     allow_headers=["*"],
 )

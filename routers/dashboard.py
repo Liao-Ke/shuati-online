@@ -23,20 +23,29 @@ def dashboard(user: User = Depends(get_current_user), db: Session = Depends(get_
         .scalar() or 0
     )
 
-    exams = (
+    stats = db.query(
+        func.count(ExamRecord.id).label("total_exams"),
+        func.coalesce(func.sum(ExamRecord.correct_count), 0).label("total_correct"),
+        func.coalesce(func.sum(ExamRecord.correct_count + ExamRecord.wrong_count), 0).label("total_done"),
+    ).filter(
+        ExamRecord.user_id == user.id, ExamRecord.status == "completed"
+    ).first()
+
+    total_exams = stats.total_exams or 0
+    total_correct = int(stats.total_correct or 0)
+    total_done = int(stats.total_done or 0)
+    average_accuracy = round(total_correct / total_done, 4) if total_done > 0 else 0
+
+    recent_rows = (
         db.query(ExamRecord)
         .filter(ExamRecord.user_id == user.id, ExamRecord.status == "completed")
         .order_by(desc(ExamRecord.started_at))
+        .limit(5)
         .all()
     )
 
-    total_exams = len(exams)
-    total_correct = sum(e.correct_count for e in exams)
-    total_done = sum(e.correct_count + e.wrong_count for e in exams)
-    average_accuracy = round(total_correct / total_done, 4) if total_done > 0 else 0
-
     recent = []
-    for r in exams[:5]:
+    for r in recent_rows:
         total = r.correct_count + r.wrong_count
         accuracy = round(r.correct_count / total, 4) if total > 0 else 0
         recent.append(HistoryItem(

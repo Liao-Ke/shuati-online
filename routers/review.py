@@ -93,7 +93,12 @@ def mark_question(
     if data.status not in ("known", "reviewing"):
         raise HTTPException(status_code=400, detail="状态值无效，仅支持 known/reviewing")
 
-    question = db.query(Question).filter(Question.id == data.question_id).first()
+    question = (
+        db.query(Question)
+        .join(QuestionBank)
+        .filter(Question.id == data.question_id, QuestionBank.user_id == user.id)
+        .first()
+    )
     if not question:
         raise HTTPException(status_code=404, detail="题目不存在")
 
