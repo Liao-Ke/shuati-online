@@ -61,12 +61,49 @@ def auth_headers(client):
     return {"Authorization": f"Bearer {state.token}"}
 
 
+# ── Test: 健康检查 ──
+
+
+def test_00_health(client):
+    r = client.get("/api/health")
+    assert r.status_code == 200
+    assert r.json()["status"] == "ok"
+
+
 # ── Test: 注册 + 题库导入 ──
 
 
 def test_01_register(auth_headers):
     assert state.token is not None
     assert state.username is not None
+
+
+def test_01b_login_success(client):
+    r = client.post("/api/auth/login", json={"username": state.username, "password": "123456"})
+    assert r.status_code == 200
+    data = r.json()
+    assert "access_token" in data
+    assert data["user"]["username"] == state.username
+
+
+def test_01c_login_wrong_password(client):
+    r = client.post("/api/auth/login", json={"username": state.username, "password": "wrongpwd"})
+    assert r.status_code == 401
+
+
+def test_01d_me(client, auth_headers):
+    r = client.get("/api/auth/me", headers=auth_headers)
+    assert r.status_code == 200
+    assert r.json()["username"] == state.username
+
+
+def test_01e_register_validation(client):
+    r = client.post("/api/auth/register", json={"username": "a", "password": "123456"})
+    assert r.status_code == 400
+    r = client.post("/api/auth/register", json={"username": "validuser", "password": "12"})
+    assert r.status_code == 400
+    r = client.post("/api/auth/register", json={"username": state.username, "password": "123456"})
+    assert r.status_code == 400
 
 
 def test_02_import_bank(client, auth_headers):
@@ -80,6 +117,28 @@ def test_03_list_banks(client, auth_headers):
     r = client.get("/api/question-banks", headers=auth_headers)
     assert r.status_code == 200
     assert len(r.json()) >= 1
+
+
+def test_03b_import_multiple(client, auth_headers):
+    data = [
+        {"title": "批量题库A", "questions": [
+            {"type": "choice", "content": "2+2=?", "options": ["A.3", "B.4"], "answer": "B"},
+        ]},
+        {"title": "", "questions": [
+            {"type": "choice", "content": "x", "options": ["A.1"], "answer": "A"},
+        ]},
+    ]
+    r = client.post("/api/question-banks/import-multiple", json=data, headers=auth_headers)
+    assert r.status_code == 200
+    results = r.json()["results"]
+    assert len(results) == 2
+    assert results[0]["success"] is True
+    assert results[1]["success"] is False
+    r = client.get("/api/question-banks", headers=auth_headers)
+    for b in r.json():
+        if b["title"] == "批量题库A":
+            client.delete(f"/api/question-banks/{b['id']}", headers=auth_headers)
+            break
 
 
 # ── Test: 答题流程 ──
@@ -147,6 +206,14 @@ def test_06a_finish_exam_unanswered_count(client, auth_headers):
     res = r.json()
     assert res["total_count"] == total, f"total_count 应为 {total}，实际 {res['total_count']}"
     assert res["wrong_count"] == total - res["correct_count"], "未作答题应计入 wrong_count"
+
+
+def test_06b_exam_progress(client, auth_headers):
+    r = client.get(f"/api/exam/{state.exam_id}/progress", headers=auth_headers)
+    assert r.status_code == 200
+    data = r.json()
+    assert data["total_count"] == 5
+    assert len(data["answers"]) == 5
 
 
 def test_06c_preview_hides_unanswered(client, auth_headers):
@@ -256,6 +323,62 @@ def test_07e_wrong_practice_no_wrong_questions(client, auth_headers):
     headers = {"Authorization": f"Bearer {token}"}
     r = client.post("/api/wrong-answers/start", json={}, headers=headers)
     assert r.status_code == 400, f"无错题应返回 400: {r.text}"
+
+
+# ── Test: 提前交卷 ──
+
+
+def test_07f_early_finish(client, auth_headers):
+    r = client.post("/api/exam/start", json={
+        "bank_ids": [state.bank_id], "mode": "sequential",
+        "types": ["choice"], "choice_timeout": 30, "judge_fill_timeout": 60,
+    }, headers=auth_headers)
+    assert r.status_code == 200
+    early_exam_id = r.json()["exam_id"]
+    r = client.get(f"/api/exam/{early_exam_id}/current", headers=auth_headers)
+    qid = r.json()["question"]["id"]
+    r = client.post(f"/api/exam/{early_exam_id}/answer", json={
+        "exam_id": early_exam_id, "question_id": qid,
+        "user_answer": "B", "time_spent_seconds": 5,
+    }, headers=auth_headers)
+    assert r.status_code == 200
+    r = client.post(f"/api/exam/{early_exam_id}/finish", json={}, headers=auth_headers)
+    assert r.status_code == 200
+    r = client.get(f"/api/exam/{early_exam_id}/result", headers=auth_headers)
+    assert r.status_code == 200
+    assert r.json()["total_count"] == 1
+
+
+def test_07g_submit_after_finish_400(client, auth_headers):
+    r = client.post("/api/exam/start", json={
+        "bank_ids": [state.bank_id], "mode": "sequential",
+        "types": ["choice", "fill"], "choice_timeout": 30, "judge_fill_timeout": 60,
+    }, headers=auth_headers)
+    finished_exam_id = r.json()["exam_id"]
+    r = client.get(f"/api/exam/{finished_exam_id}/current", headers=auth_headers)
+    qid = r.json()["question"]["id"]
+    client.post(f"/api/exam/{finished_exam_id}/answer", json={
+        "exam_id": finished_exam_id, "question_id": qid,
+        "user_answer": "B", "time_spent_seconds": 5,
+    }, headers=auth_headers)
+    client.post(f"/api/exam/{finished_exam_id}/finish", json={}, headers=auth_headers)
+    r = client.post(f"/api/exam/{finished_exam_id}/answer", json={
+        "exam_id": finished_exam_id, "question_id": qid,
+        "user_answer": "A", "time_spent_seconds": 5,
+    }, headers=auth_headers)
+    assert r.status_code == 400
+
+
+def test_07h_unfinished_exam_result_409(client, auth_headers):
+    r = client.post("/api/exam/start", json={
+        "bank_ids": [state.bank_id], "mode": "sequential",
+        "types": ["choice"], "choice_timeout": 30, "judge_fill_timeout": 60,
+    }, headers=auth_headers)
+    unfinished_exam_id = r.json()["exam_id"]
+    r = client.get(f"/api/exam/{unfinished_exam_id}/result", headers=auth_headers)
+    assert r.status_code == 409
+    r = client.post(f"/api/exam/{unfinished_exam_id}/finish", json={}, headers=auth_headers)
+    assert r.status_code == 200
 
 
 def test_08_history(client, auth_headers):
@@ -385,6 +508,16 @@ def test_20a_delete_blocked_by_inprogress(client, auth_headers):
     assert r.status_code == 204, f"考试完成后应可删除题目: {r.text}"
     r = client.delete(f"/api/question-banks/{test_bank_id}", headers=auth_headers)
     assert r.status_code == 204, f"考试完成后应可删除题库: {r.text}"
+
+
+def test_21_review_chapters(client, auth_headers):
+    r = client.post("/api/review/chapters", json={
+        "bank_ids": [state.bank_id],
+    }, headers=auth_headers)
+    assert r.status_code == 200
+    chapters = r.json()
+    assert "基础" in chapters
+    assert "进阶" in chapters
 
 
 # ── Test: 背题模式 ──
