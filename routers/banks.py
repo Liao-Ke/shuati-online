@@ -4,7 +4,7 @@ from urllib.parse import quote
 
 from fastapi import APIRouter, Depends, HTTPException
 from fastapi.responses import Response
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, selectinload
 
 from auth import get_current_user
 from database import get_db
@@ -56,7 +56,13 @@ def validate_bank_import(data: BankImport) -> list[str]:
 
 @router.get("", response_model=list[BankOut])
 def list_banks(user: User = Depends(get_current_user), db: Session = Depends(get_db)):
-    banks = db.query(QuestionBank).filter(QuestionBank.user_id == user.id).order_by(QuestionBank.updated_at.desc()).all()
+    banks = (
+        db.query(QuestionBank)
+        .options(selectinload(QuestionBank.questions))
+        .filter(QuestionBank.user_id == user.id)
+        .order_by(QuestionBank.updated_at.desc())
+        .all()
+    )
     result = []
     for bank in banks:
         result.append(BankOut(
