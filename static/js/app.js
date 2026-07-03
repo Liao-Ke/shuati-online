@@ -1394,8 +1394,9 @@ async function finishExam() {
 }
 
 function parseTime(str) {
-  const parts = str.split(':');
-  return parseInt(parts[0]) * 60 + parseInt(parts[1]);
+  // ponytail: 仅接受 M:SS 整数格式，空串/异常格式返回 0，避免 parseInt(undefined)→NaN 导致暂停恢复崩溃
+  const m = /^(\d+):(\d+)$/.exec(String(str || ''));
+  return m ? Number(m[1]) * 60 + Number(m[2]) : 0;
 }
 
 function trackPreviewScroll() {
@@ -1732,8 +1733,10 @@ function startTimer(remaining) {
 }
 
 function formatTime(sec) {
+  // ponytail: 负数或非有限值钳为 0，防止倒计时越界后显示 "-1:-1"
+  if (!Number.isFinite(sec) || sec < 0) sec = 0;
   const m = Math.floor(sec / 60);
-  const s = sec % 60;
+  const s = Math.floor(sec % 60);
   return `${m}:${s.toString().padStart(2, '0')}`;
 }
 
