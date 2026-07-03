@@ -11,7 +11,7 @@ from auth import get_current_user
 from database import get_db
 from models import AnswerRecord, ExamRecord, Question, QuestionBank, User, utcnow
 from schemas import AnswerResult, AnswerSubmit, ExamCurrent, ExamProgress, ExamResult, ExamStart, QuestionOut
-from utils import parse_json_field
+from utils import parse_answer, parse_json_field
 
 logger = logging.getLogger("shuati")
 
@@ -128,7 +128,7 @@ def current_question(
             user_answer_display = parse_json_field(record.user_answer)
         correct_answer = None
         if is_answered:
-            correct_answer = parse_json_field(q.answer)
+            correct_answer = parse_answer(q.answer, q.type)
         return ExamCurrent(
             exam_id=exam.id, current_index=index + 1, total_count=exam.question_count,
             question=q_out, is_answered=is_answered,
@@ -203,7 +203,7 @@ def submit_answer(data: AnswerSubmit, user: User = Depends(get_current_user), db
     if not question:
         raise HTTPException(status_code=404, detail="题目不存在")
 
-    correct_answer = parse_json_field(question.answer)
+    correct_answer = parse_answer(question.answer, question.type)
 
     if question.type == "choice" or question.type == "judge":
         is_correct = data.user_answer == correct_answer
@@ -281,7 +281,7 @@ def exam_preview(
     for i, q in enumerate(all_questions):
         record = answered_map.get(q.id)
         is_answered = record is not None
-        correct_answer = parse_json_field(q.answer) if is_answered else None
+        correct_answer = parse_answer(q.answer, q.type) if is_answered else None
         analysis = q.analysis if is_answered else None
         user_answer = None
         if record and record.user_answer:
@@ -354,7 +354,7 @@ def exam_result(exam_id: int, user: User = Depends(get_current_user), db: Sessio
         q = questions_map.get(a.question_id)
         if not q:
             continue
-        correct_answer = parse_json_field(q.answer)
+        correct_answer = parse_answer(q.answer, q.type)
         user_answer = parse_json_field(a.user_answer)
         result_answers.append({
             "question_id": q.id,

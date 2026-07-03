@@ -8,7 +8,7 @@ from auth import get_current_user
 from database import get_db
 from models import ExamRecord, Question, QuestionBank, User
 from schemas import QuestionCreate, QuestionOut, QuestionUpdate
-from utils import parse_json_field
+from utils import parse_answer, parse_json_field
 
 router = APIRouter(prefix="/api", tags=["题目"])
 
@@ -112,10 +112,7 @@ def update_question(
     else:
         new_options = json.loads(question.options) if question.options else None
 
-    if data.answer is not None:
-        new_answer = data.answer
-    else:
-        new_answer = json.loads(question.answer) if (question.answer and question.answer.startswith("[")) else question.answer
+    new_answer = data.answer if data.answer is not None else parse_answer(question.answer, new_type)
 
     errors = _validate_question(new_type, new_content, new_options, new_answer)
     if errors:

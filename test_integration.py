@@ -731,6 +731,71 @@ def test_43_export_bank_not_found(client, auth_headers):
     assert r.status_code == 404
 
 
+# ── Test: 以 [ 开头的填空题答案不被误判为 JSON（issue #11）──
+
+
+BRACKET_ANSWER_BANK = {
+    "title": "化学括号答案测试",
+    "description": "测试以 [ 开头的答案",
+    "questions": [
+        {"type": "fill", "content": "氢离子的化学式是____", "answer": "[H⁺]"},
+        {"type": "fill", "content": "铁氰化钾的化学式是____", "answer": "[Fe(CN)₆]⁴⁻"},
+        {"type": "fill", "content": "两个数字", "answer": ["1", "2"]},
+    ],
+}
+
+
+def test_bracket_answer_import(client, auth_headers):
+    r = client.post("/api/question-banks/import", json=BRACKET_ANSWER_BANK, headers=auth_headers)
+    assert r.status_code == 201, f"导入失败: {r.text}"
+    state._bracket_bank_id = r.json()["id"]
+
+
+def test_bracket_answer_submit_correct(client, auth_headers):
+    r = client.post("/api/exam/start", json={
+        "bank_ids": [state._bracket_bank_id], "mode": "sequential",
+    }, headers=auth_headers)
+    assert r.status_code == 200
+    exam_id = r.json()["exam_id"]
+    r = client.get(f"/api/exam/{exam_id}/current", headers=auth_headers)
+    qid = r.json()["question"]["id"]
+    r = client.post(f"/api/exam/{exam_id}/answer", json={
+        "exam_id": exam_id, "question_id": qid,
+        "user_answer": "[H⁺]", "time_spent_seconds": 5,
+    }, headers=auth_headers)
+    assert r.status_code == 200
+    assert r.json()["is_correct"] is True, f"答案 [H⁺] 应判对: {r.json()}"
+    client.post(f"/api/exam/{exam_id}/finish", json={}, headers=auth_headers)
+
+
+def test_bracket_answer_submit_wrong(client, auth_headers):
+    r = client.post("/api/exam/start", json={
+        "bank_ids": [state._bracket_bank_id], "mode": "sequential",
+    }, headers=auth_headers)
+    assert r.status_code == 200
+    exam_id = r.json()["exam_id"]
+    r = client.get(f"/api/exam/{exam_id}/current", headers=auth_headers)
+    qid = r.json()["question"]["id"]
+    r = client.post(f"/api/exam/{exam_id}/answer", json={
+        "exam_id": exam_id, "question_id": qid,
+        "user_answer": "[OH⁻]", "time_spent_seconds": 5,
+    }, headers=auth_headers)
+    assert r.status_code == 200
+    assert r.json()["is_correct"] is False, f"答案 [OH⁻] 应判错: {r.json()}"
+    client.post(f"/api/exam/{exam_id}/finish", json={}, headers=auth_headers)
+
+
+def test_bracket_answer_export(client, auth_headers):
+    r = client.get(f"/api/question-banks/{state._bracket_bank_id}/export", headers=auth_headers)
+    assert r.status_code == 200
+    data = r.json()
+    answers = {q["content"]: q["answer"] for q in data["questions"]}
+    assert answers["氢离子的化学式是____"] == "[H⁺]"
+    assert answers["铁氰化钾的化学式是____"] == "[Fe(CN)₆]⁴⁻"
+    assert answers["两个数字"] == ["1", "2"]
+    client.delete(f"/api/question-banks/{state._bracket_bank_id}", headers=auth_headers)
+
+
 # ── Test: 完整恢复初始数据 ──
 
 

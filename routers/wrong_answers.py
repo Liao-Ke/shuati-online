@@ -8,7 +8,7 @@ from auth import get_current_user
 from database import get_db
 from models import AnswerRecord, ExamRecord, Question, User
 from schemas import WrongAnswerStartRequest
-from utils import parse_json_field
+from utils import parse_answer, parse_json_field
 
 router = APIRouter(prefix="/api/wrong-answers", tags=["错题"])
 
@@ -102,7 +102,7 @@ def list_wrong(user: User = Depends(get_current_user), db: Session = Depends(get
             "chapter": q.chapter,
             "content": q.content,
             "options": parse_json_field(q.options),
-            "correct_answer": parse_json_field(q.answer),
+            "correct_answer": parse_answer(q.answer, q.type),
             "user_answer": user_answer,
             "analysis": q.analysis,
         })

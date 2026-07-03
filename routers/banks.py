@@ -10,7 +10,7 @@ from auth import get_current_user
 from database import get_db
 from models import ExamRecord, Question, QuestionBank, User
 from schemas import BankDetail, BankImport, BankOut, BankUpdate, BatchImportResponse, ImportResult, QuestionOut
-from utils import parse_json_field
+from utils import parse_answer, parse_json_field
 
 logger = logging.getLogger("shuati")
 
@@ -230,7 +230,7 @@ def export_bank(
         qdata["content"] = q.content
         if q.options:
             qdata["options"] = json.loads(q.options)
-        qdata["answer"] = json.loads(q.answer) if (q.answer and q.answer.startswith("[")) else q.answer
+        qdata["answer"] = parse_answer(q.answer, q.type)
         if q.analysis:
             qdata["analysis"] = q.analysis
         questions.append(qdata)
