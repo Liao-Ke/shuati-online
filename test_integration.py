@@ -1,5 +1,6 @@
 import uuid
 from datetime import UTC, datetime, timedelta
+from unittest.mock import patch
 
 import pytest
 from fastapi.testclient import TestClient
@@ -139,6 +140,48 @@ def test_03b_import_multiple(client, auth_headers):
         if b["title"] == "批量题库A":
             client.delete(f"/api/question-banks/{b['id']}", headers=auth_headers)
             break
+
+
+def test_03c_import_multiple_db_failure(client, auth_headers):
+    data = [
+        {"title": "DB隔离A", "questions": [
+            {"type": "choice", "content": "1+1=?", "options": ["A.1", "B.2"], "answer": "B"},
+        ]},
+        {"title": "DB隔离B-失败", "questions": [
+            {"type": "choice", "content": "x", "options": ["A.1", "B.2"], "answer": "A"},
+        ]},
+        {"title": "DB隔离C", "questions": [
+            {"type": "choice", "content": "3+3=?", "options": ["A.5", "B.6"], "answer": "B"},
+        ]},
+    ]
+
+    from routers.banks import _do_import_one as real_import
+
+    def side_effect(bank_data, user, db):
+        if bank_data.title == "DB隔离B-失败":
+            raise RuntimeError("模拟数据库异常")
+        return real_import(bank_data, user, db)
+
+    with patch("routers.banks._do_import_one", side_effect=side_effect):
+        r = client.post("/api/question-banks/import-multiple", json=data, headers=auth_headers)
+
+    assert r.status_code == 200
+    results = r.json()["results"]
+    assert len(results) == 3
+    assert results[0]["success"] is True
+    assert results[1]["success"] is False
+    assert "模拟数据库异常" in results[1]["error"]
+    assert results[2]["success"] is True
+
+    r = client.get("/api/question-banks", headers=auth_headers)
+    titles = {b["title"] for b in r.json()}
+    assert "DB隔离A" in titles
+    assert "DB隔离B-失败" not in titles
+    assert "DB隔离C" in titles
+
+    for b in r.json():
+        if b["title"] in ("DB隔离A", "DB隔离C"):
+            client.delete(f"/api/question-banks/{b['id']}", headers=auth_headers)
 
 
 # ── Test: 答题流程 ──
