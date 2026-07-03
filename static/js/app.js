@@ -583,17 +583,36 @@ router.add('/result/:id', async ({ id }) => {
 });
 
 router.add('/history', async () => {
+  await loadHistory(1);
+});
+
+// 练习历史分页加载。后端 /api/history 已支持 page/page_size，前端 API 层 getHistory(page) 仅缺 UI 调用方。
+// loadHistory 在顶层声明，供内联 onclick="loadHistory(N)" 调用（app.js 为经典脚本，函数声明为全局）。
+async function loadHistory(page) {
+  page = Number(page) || 1;
+  if (page < 1) page = 1;
   showNav();
   render('<div class="text-center py-5"><div class="spinner-border"></div></div>');
   try {
-    const list = await api.getHistory();
+    const list = await api.getHistory(page);
+    const pageSize = 20;
+    const hasMore = list.length >= pageSize; // 返回数 < page_size 即到底
+    const empty = list.length === 0;
+    const showPager = !empty || page > 1; // 翻过头到空页时仍需控件以便回退
     render(`
       <div class="page-header"><h2>练习历史</h2></div>
-      ${list.length === 0 ? '<div class="empty-state"><p>还没有练习记录</p></div>' : ''}
+      ${empty ? `<div class="empty-state"><p>${page > 1 ? '没有更多记录' : '还没有练习记录'}</p></div>` : ''}
       <div id="history-list"></div>
+      ${showPager ? `
+        <div class="d-flex justify-content-center align-items-center gap-2 mt-3">
+          <button class="btn btn-outline-secondary btn-sm" onclick="loadHistory(${page - 1})"${page <= 1 ? ' disabled' : ''}>&larr; 上一页</button>
+          <span class="text-muted">第 ${page} 页</span>
+          <button class="btn btn-outline-secondary btn-sm" onclick="loadHistory(${page + 1})"${!hasMore ? ' disabled' : ''}>下一页 &rarr;</button>
+        </div>
+      ` : ''}
     `);
-    if (list.length > 0) {
-      const container = document.getElementById('history-list');
+    const container = document.getElementById('history-list');
+    if (container) {
       list.forEach(h => {
         const date = new Date(h.started_at).toLocaleString('zh-CN');
         const acc = (h.accuracy * 100).toFixed(0);
@@ -614,7 +633,7 @@ router.add('/history', async () => {
   } catch {
     render('<div class="alert alert-danger">加载失败</div>');
   }
-});
+}
 
 router.add('/history/:id', async ({ id }) => {
   showNav();
