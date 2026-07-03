@@ -355,6 +355,36 @@ def test_20_navigate_out_of_bounds(client, auth_headers):
     assert r.status_code == 400
 
 
+def test_20a_delete_blocked_by_inprogress(client, auth_headers):
+    """进行中考试引用的题库/题目不可删除，考试完成后可删（issue #19）"""
+    import uuid
+    suffix = uuid.uuid4().hex[:8]
+    r = client.post("/api/question-banks/import", json={
+        "title": f"删除检查_{suffix}", "description": "",
+        "questions": [
+            {"type": "judge", "content": "测试判断", "answer": "对"},
+            {"type": "judge", "content": "测试判断2", "answer": "错"},
+        ],
+    }, headers=auth_headers)
+    test_bank_id = r.json()["id"]
+    r = client.post("/api/exam/start", json={
+        "bank_ids": [test_bank_id], "mode": "sequential",
+    }, headers=auth_headers)
+    exam_id = r.json()["exam_id"]
+    r = client.get(f"/api/exam/{exam_id}/current", headers=auth_headers)
+    qid_in_exam = r.json()["question"]["id"]
+    r = client.delete(f"/api/question-banks/{test_bank_id}", headers=auth_headers)
+    assert r.status_code == 409, f"进行中考试引用的题库应返回 409: {r.text}"
+    r = client.delete(f"/api/questions/{qid_in_exam}", headers=auth_headers)
+    assert r.status_code == 409, f"进行中考试引用的题目应返回 409: {r.text}"
+    r = client.post(f"/api/exam/{exam_id}/finish", json={}, headers=auth_headers)
+    assert r.status_code == 200
+    r = client.delete(f"/api/questions/{qid_in_exam}", headers=auth_headers)
+    assert r.status_code == 204, f"考试完成后应可删除题目: {r.text}"
+    r = client.delete(f"/api/question-banks/{test_bank_id}", headers=auth_headers)
+    assert r.status_code == 204, f"考试完成后应可删除题库: {r.text}"
+
+
 # ── Test: 背题模式 ──
 
 
