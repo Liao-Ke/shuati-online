@@ -1,5 +1,3 @@
-from pathlib import Path
-
 from auth import _load_secret_key
 
 
