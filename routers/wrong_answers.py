@@ -2,7 +2,7 @@ import json
 
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy import desc, func
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, joinedload
 
 from auth import get_current_user
 from database import get_db
@@ -56,23 +56,44 @@ def list_wrong(user: User = Depends(get_current_user), db: Session = Depends(get
 
     # 按 answered_at 降序排列
     id_order = {qid: i for i, qid in enumerate(wrong_ids)}
-    questions = db.query(Question).filter(Question.id.in_(wrong_ids)).all()
+    questions = (
+        db.query(Question)
+        .options(joinedload(Question.question_bank))
+        .filter(Question.id.in_(wrong_ids))
+        .all()
+    )
     questions.sort(key=lambda q: id_order.get(q.id, 9999))
+
+    # 批量查所有错题的最近错误作答记录，避免 N+1 查询
+    wrong_id_list = [q.id for q in questions]
+    latest_subq = (
+        db.query(
+            AnswerRecord.question_id,
+            func.max(AnswerRecord.answered_at).label("max_at"),
+        )
+        .join(ExamRecord)
+        .filter(
+            ExamRecord.user_id == user.id,
+            AnswerRecord.question_id.in_(wrong_id_list),
+            AnswerRecord.is_correct == False,
+        )
+        .group_by(AnswerRecord.question_id)
+        .subquery()
+    )
+    latest_records = (
+        db.query(AnswerRecord)
+        .join(
+            latest_subq,
+            (AnswerRecord.question_id == latest_subq.c.question_id)
+            & (AnswerRecord.answered_at == latest_subq.c.max_at),
+        )
+        .all()
+    )
+    record_map = {r.question_id: r for r in latest_records}
 
     result = []
     for q in questions:
-        # 找该题最近一次（错误的）作答记录，用于展示 user_answer
-        latest_record = (
-            db.query(AnswerRecord)
-            .join(ExamRecord)
-            .filter(
-                ExamRecord.user_id == user.id,
-                AnswerRecord.question_id == q.id,
-                AnswerRecord.is_correct == False,
-            )
-            .order_by(desc(AnswerRecord.answered_at))
-            .first()
-        )
+        latest_record = record_map.get(q.id)
         user_answer = parse_json_field(latest_record.user_answer) if latest_record else None
         result.append({
             "question_id": q.id,
