@@ -1859,7 +1859,7 @@ async function doImport() {
       btn.disabled = false; btn.innerHTML = '确认导入（仅导入成功的）';
     }
   } catch (err) {
-    preview.innerHTML = `<div class="alert alert-danger">导入失败: ${err.message}</div>`;
+    preview.innerHTML = `<div class="alert alert-danger">导入失败: ${escHtml(err.message)}</div>`;
     btn.disabled = false; btn.innerHTML = '确认导入';
   }
 }
