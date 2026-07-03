@@ -179,6 +179,8 @@ def test_06c_preview_hides_unanswered(client, auth_headers):
     for q in unanswered:
         assert q["answer"] is None, f"未答题 {q['id']} 不应返回 answer"
         assert q["analysis"] is None, f"未答题 {q['id']} 不应返回 analysis"
+    r = client.post(f"/api/exam/{exam_id}/finish", json={}, headers=auth_headers)
+    assert r.status_code == 200
 
 
 # ── Test: 错题本 + 历史 ──
