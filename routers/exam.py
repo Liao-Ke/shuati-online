@@ -280,7 +280,9 @@ def exam_preview(
     questions = []
     for i, q in enumerate(all_questions):
         record = answered_map.get(q.id)
-        correct_answer = parse_json_field(q.answer)
+        is_answered = record is not None
+        correct_answer = parse_json_field(q.answer) if is_answered else None
+        analysis = q.analysis if is_answered else None
         user_answer = None
         if record and record.user_answer:
             user_answer = parse_json_field(record.user_answer)
@@ -292,9 +294,9 @@ def exam_preview(
             "content": q.content,
             "options": parse_json_field(q.options),
             "answer": correct_answer,
-            "analysis": q.analysis,
+            "analysis": analysis,
             "user_answer": user_answer,
-            "is_answered": record is not None,
+            "is_answered": is_answered,
             "is_correct": record.is_correct if record else None,
         })
     return {"total_count": len(questions), "questions": questions}

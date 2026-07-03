@@ -124,6 +124,38 @@ def test_06_exam_result(client, auth_headers):
     assert res["correct_count"] == state.correct_count
 
 
+def test_06c_preview_hides_unanswered(client, auth_headers):
+    """整卷预览接口对未作答题隐藏 answer/analysis（issue #17）"""
+    r = client.post("/api/exam/start", json={
+        "bank_ids": [state.bank_id], "mode": "sequential",
+        "types": ["choice", "fill", "judge", "multiple"],
+        "choice_timeout": 30, "judge_fill_timeout": 60,
+    }, headers=auth_headers)
+    assert r.status_code == 200
+    exam_id = r.json()["exam_id"]
+    total = r.json()["total_count"]
+    assert total >= 2, "需要至少 2 道题才能测试部分作答场景"
+    r = client.get(f"/api/exam/{exam_id}/current", headers=auth_headers)
+    qid = r.json()["question"]["id"]
+    r = client.post(f"/api/exam/{exam_id}/answer", json={
+        "exam_id": exam_id, "question_id": qid,
+        "user_answer": "B", "time_spent_seconds": 3,
+    }, headers=auth_headers)
+    assert r.status_code == 200
+    r = client.get(f"/api/exam/{exam_id}/preview", headers=auth_headers)
+    assert r.status_code == 200
+    questions = r.json()["questions"]
+    assert len(questions) == total
+    answered = [q for q in questions if q["is_answered"]]
+    unanswered = [q for q in questions if not q["is_answered"]]
+    assert len(answered) == 1, "应该只有 1 道已答题"
+    assert len(unanswered) == total - 1, "其余应为未答题"
+    assert answered[0]["answer"] is not None, "已答题应返回 answer"
+    for q in unanswered:
+        assert q["answer"] is None, f"未答题 {q['id']} 不应返回 answer"
+        assert q["analysis"] is None, f"未答题 {q['id']} 不应返回 analysis"
+
+
 # ── Test: 错题本 + 历史 ──
 
 
