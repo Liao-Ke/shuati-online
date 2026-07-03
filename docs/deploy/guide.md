@@ -113,7 +113,7 @@ nohup uvicorn main:app --host 0.0.0.0 --port 8000 > app.log 2>&1 &
 | 环境变量 | 默认值 | 说明 |
 |---------|--------|------|
 | `DATABASE_URL` | `sqlite:///./exam.db` | 数据库连接。Docker 下应为 `sqlite:///./data/exam.db` |
-| `SECRET_KEY` | **无默认值（生产环境必须设置）** | JWT 签名密钥，通过 `docker-compose.yml` 或环境变量注入 |
+| `SECRET_KEY` | **无默认值（生产环境必须设置）** | JWT 签名密钥。开发环境未设置时自动生成并持久化到 `.secret_key` 文件，重启后复用；生产环境通过 `docker-compose.yml` 或环境变量注入 |
 
 ### 生产环境必须设置
 

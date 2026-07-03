@@ -2,6 +2,7 @@ import logging
 import os
 import secrets
 from datetime import UTC, datetime, timedelta
+from pathlib import Path
 
 from fastapi import Depends, HTTPException, status
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
@@ -14,8 +15,37 @@ from models import User
 
 logger = logging.getLogger("shuati")
 
-_SECRET_KEY = os.getenv("SECRET_KEY") or secrets.token_hex(32)
-SECRET_KEY = _SECRET_KEY
+_DEFAULT_KEY_PATH = Path(__file__).parent / ".secret_key"
+
+
+def _load_secret_key(path: Path | None = None) -> str:
+    env_key = os.getenv("SECRET_KEY")
+    if env_key:
+        return env_key
+
+    key_path = path or _DEFAULT_KEY_PATH
+    try:
+        if key_path.is_file():
+            stored = key_path.read_text(encoding="utf-8").strip()
+            if stored:
+                logger.info("从 %s 读取 SECRET_KEY", key_path)
+                return stored
+    except OSError:
+        logger.warning("读取 %s 失败，将生成新密钥", key_path)
+
+    generated = secrets.token_hex(32)
+    logger.warning(
+        "SECRET_KEY 未设置，已生成随机密钥并持久化到 %s。生产环境请通过环境变量设置 SECRET_KEY。",
+        key_path,
+    )
+    try:
+        key_path.write_text(generated, encoding="utf-8")
+    except OSError:
+        logger.warning("无法写入 %s，密钥仅在本次进程有效，重启后 JWT 将失效", key_path)
+    return generated
+
+
+SECRET_KEY = _load_secret_key()
 ALGORITHM = "HS256"
 ACCESS_TOKEN_EXPIRE_MINUTES = 60 * 24 * 7
 JWT_ISSUER = "shuati-online"

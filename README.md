@@ -103,7 +103,7 @@ docker compose up -d
 | 环境变量 | 默认值 | 说明 |
 |---------|--------|------|
 | `DATABASE_URL` | `sqlite:///./exam.db` | 数据库连接。Docker 下为 `sqlite:///./data/exam.db` |
-| `SECRET_KEY` | **无默认值（生产环境必须设置）** | JWT 签名密钥，通过环境变量注入 |
+| `SECRET_KEY` | **无默认值（生产环境必须设置）** | JWT 签名密钥。开发环境未设置时自动生成并持久化到 `.secret_key` 文件，重启后复用；生产环境通过环境变量注入 |
 
 ## 题库格式
 
