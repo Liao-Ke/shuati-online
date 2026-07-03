@@ -4,6 +4,7 @@ import random
 import zlib
 
 from fastapi import APIRouter, Depends, HTTPException
+from sqlalchemy import func
 from sqlalchemy.orm import Session
 
 from auth import get_current_user
@@ -229,11 +230,15 @@ def submit_answer(data: AnswerSubmit, user: User = Depends(get_current_user), db
         time_spent_seconds=data.time_spent_seconds,
     )
     db.add(record)
-    if is_correct:
-        exam.correct_count += 1
-    else:
-        exam.wrong_count += 1
-    exam.duration_seconds = (exam.duration_seconds or 0) + record.time_spent_seconds
+    # 原子化计数更新，避免并发 read-modify-write 竞态导致计数丢失（issue #26）
+    db.query(ExamRecord).filter(ExamRecord.id == exam.id).update(
+        {
+            ExamRecord.correct_count: ExamRecord.correct_count + (1 if is_correct else 0),
+            ExamRecord.wrong_count: ExamRecord.wrong_count + (0 if is_correct else 1),
+            ExamRecord.duration_seconds: func.coalesce(ExamRecord.duration_seconds, 0) + record.time_spent_seconds,
+        },
+        synchronize_session=False,
+    )
     db.commit()
 
     remaining, answered = _load_exam_questions(exam, db)
