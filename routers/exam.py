@@ -315,6 +315,11 @@ def finish_exam(
         raise HTTPException(status_code=404, detail="练习不存在")
     if exam.status == "completed":
         return {"exam_id": exam.id, "status": "completed"}
+    # 未作答题计入 wrong_count，保证 total_count == question_count（issue #22）
+    answered_count = db.query(AnswerRecord).filter(AnswerRecord.exam_id == exam.id).count()
+    unanswered = (exam.question_count or 0) - answered_count
+    if unanswered > 0:
+        exam.wrong_count = (exam.wrong_count or 0) + unanswered
     exam.status = "completed"
     exam.finished_at = utcnow()
     if exam.timer_mode == "elapsed" and exam.started_at and exam.finished_at:

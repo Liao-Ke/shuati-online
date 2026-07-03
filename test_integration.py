@@ -124,6 +124,31 @@ def test_06_exam_result(client, auth_headers):
     assert res["correct_count"] == state.correct_count
 
 
+def test_06a_finish_exam_unanswered_count(client, auth_headers):
+    """finish_exam 时未作答题应计入 wrong_count，total_count == question_count（issue #22）"""
+    r = client.post("/api/exam/start", json={
+        "bank_ids": [state.bank_id], "mode": "sequential",
+        "types": ["choice", "fill", "judge", "multiple"],
+        "choice_timeout": 30, "judge_fill_timeout": 60,
+    }, headers=auth_headers)
+    assert r.status_code == 200
+    exam_id = r.json()["exam_id"]
+    total = r.json()["total_count"]
+    r = client.get(f"/api/exam/{exam_id}/current", headers=auth_headers)
+    qid = r.json()["question"]["id"]
+    r = client.post(f"/api/exam/{exam_id}/answer", json={
+        "exam_id": exam_id, "question_id": qid,
+        "user_answer": "B", "time_spent_seconds": 3,
+    }, headers=auth_headers)
+    assert r.status_code == 200
+    r = client.post(f"/api/exam/{exam_id}/finish", json={}, headers=auth_headers)
+    assert r.status_code == 200
+    r = client.get(f"/api/exam/{exam_id}/result", headers=auth_headers)
+    res = r.json()
+    assert res["total_count"] == total, f"total_count 应为 {total}，实际 {res['total_count']}"
+    assert res["wrong_count"] == total - res["correct_count"], "未作答题应计入 wrong_count"
+
+
 def test_06c_preview_hides_unanswered(client, auth_headers):
     """整卷预览接口对未作答题隐藏 answer/analysis（issue #17）"""
     r = client.post("/api/exam/start", json={
