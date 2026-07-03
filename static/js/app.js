@@ -1690,7 +1690,9 @@ function togglePreviewMulti(el) {
 
 async function submitInlineMulti(examId, questionId, index) {
   if (examPaused) return;
-  const selected = [...document.querySelectorAll(`.preview-multi-option.selected`)].map(el => el.dataset.letter);
+  // 仅在当前题目卡片内选取已选选项，避免整卷模式下其他多选题的选择被一并提交
+  const card = document.querySelector(`.preview-card[data-index="${index}"]`);
+  const selected = card ? [...card.querySelectorAll('.preview-multi-option.selected')].map(el => el.dataset.letter) : [];
   if (selected.length === 0) { alert('请至少选择一个选项'); return; }
   await submitInlineAnswer(examId, questionId, index, selected);
 }
@@ -1753,14 +1755,18 @@ async function submitCurrentAnswer() {
     userAnswer = [...selectedMultiAnswers];
     selectedMultiAnswers = [];
   }
-  const fillInputs = document.querySelectorAll('.fill-input');
-  if (fillInputs.length > 0) {
-    userAnswer = [...fillInputs].map(inp => inp.value.trim()).filter(v => v !== '');
-    if (userAnswer.length === 0) userAnswer = null;
-    else if (userAnswer.length === 1) userAnswer = userAnswer[0];
+  // 仅在单题模式下从当前题目的输入区读取填空答案，避免整卷模式或 DOM 残留元素覆盖其他题型的选择
+  const optionsArea = document.getElementById('options-area');
+  if (optionsArea) {
+    const fillInputs = optionsArea.querySelectorAll('.fill-input');
+    if (fillInputs.length > 0) {
+      userAnswer = [...fillInputs].map(inp => inp.value.trim()).filter(v => v !== '');
+      if (userAnswer.length === 0) userAnswer = null;
+      else if (userAnswer.length === 1) userAnswer = userAnswer[0];
+    }
+    const singleFill = optionsArea.querySelector('#fill-answer');
+    if (singleFill) userAnswer = singleFill.value.trim() || null;
   }
-  const singleFill = document.getElementById('fill-answer');
-  if (singleFill) userAnswer = singleFill.value.trim() || null;
 
   try {
     const data = await api.getCurrentQuestion(examId, examCurrentIndex);
