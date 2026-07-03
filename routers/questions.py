@@ -6,8 +6,9 @@ from sqlalchemy.orm import Session
 
 from auth import get_current_user
 from database import get_db
-from models import Question, QuestionBank, User
+from models import ExamRecord, Question, QuestionBank, User
 from schemas import QuestionCreate, QuestionOut, QuestionUpdate
+from utils import parse_json_field
 
 router = APIRouter(prefix="/api", tags=["题目"])
 
@@ -144,5 +145,12 @@ def delete_question(
     ).first()
     if not question:
         raise HTTPException(status_code=404, detail="题目不存在")
+    # 检查是否有进行中的考试引用该题目（issue #19）
+    in_progress = db.query(ExamRecord).filter(
+        ExamRecord.user_id == user.id, ExamRecord.status == "in_progress",
+    ).all()
+    for exam in in_progress:
+        if question_id in (parse_json_field(exam.question_ids) or []):
+            raise HTTPException(status_code=409, detail="该题目被进行中的考试引用，请先完成或放弃考试")
     db.delete(question)
     db.commit()
