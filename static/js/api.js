@@ -76,8 +76,14 @@ const api = {
     }
     const blob = await res.blob();
     const disposition = res.headers.get('Content-Disposition') || '';
-    const match = disposition.match(/filename="?(.+?)"?$/);
-    const filename = match ? match[1] : `bank-${bankId}.json`;
+    let filename = `bank-${bankId}.json`;
+    const starMatch = disposition.match(/filename\*=UTF-8''(.+)/);
+    if (starMatch) {
+      filename = decodeURIComponent(starMatch[1]);
+    } else {
+      const plainMatch = disposition.match(/filename="?([^";]+?)"?(?:;|$)/);
+      if (plainMatch) filename = plainMatch[1];
+    }
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
     a.href = url;

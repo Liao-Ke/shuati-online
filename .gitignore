@@ -11,3 +11,6 @@ __pycache__/
 .opencode/
 .reasonix/
 reasonix.toml
+
+.agent_context/
+.multica/

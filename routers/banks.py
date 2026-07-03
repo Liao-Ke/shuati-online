@@ -239,5 +239,5 @@ def export_bank(
     return Response(
         content=json_str,
         media_type="application/json",
-        headers={"Content-Disposition": f"attachment; filename*=UTF-8''{safe_filename}"},
+        headers={"Content-Disposition": f"attachment; filename=\"bank-{bank_id}.json\"; filename*=UTF-8''{safe_filename}"},
     )
