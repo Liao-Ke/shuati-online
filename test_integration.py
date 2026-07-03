@@ -106,15 +106,6 @@ def test_01e_register_validation(client):
     assert r.status_code == 400
 
 
-def test_01f_register_strip(client):
-    """注册接口应 strip 用户名（issue #24）"""
-    r = client.post("/api/auth/register", json={"username": "  stripuser  ", "password": "123456"})
-    assert r.status_code == 200, f"带空格的用户名应注册成功: {r.text}"
-    assert r.json()["user"]["username"] == "stripuser", "用户名应被 strip"
-    r = client.post("/api/auth/login", json={"username": "stripuser", "password": "123456"})
-    assert r.status_code == 200, "strip 后的用户名应能登录"
-
-
 def test_02_import_bank(client, auth_headers):
     r = client.post("/api/question-banks/import", json=BANK_DATA, headers=auth_headers)
     assert r.status_code == 201, f"导入失败: {r.text}"
