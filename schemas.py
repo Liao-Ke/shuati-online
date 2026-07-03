@@ -1,5 +1,5 @@
 
-from pydantic import BaseModel
+from pydantic import BaseModel, field_validator
 
 
 class UserRegister(BaseModel):
@@ -80,6 +80,20 @@ class ExamStart(BaseModel):
     chapters: list[str] | None = None
     choice_timeout: int = 30
     judge_fill_timeout: int = 60
+
+    @field_validator("mode")
+    @classmethod
+    def _validate_mode(cls, v: str) -> str:
+        if v not in ("sequential", "random"):
+            raise ValueError("mode 必须为 sequential 或 random")
+        return v
+
+    @field_validator("timer_mode")
+    @classmethod
+    def _validate_timer_mode(cls, v: str) -> str:
+        if v not in ("per_question", "elapsed"):
+            raise ValueError("timer_mode 必须为 per_question 或 elapsed")
+        return v
 
 
 class ExamCurrent(BaseModel):
