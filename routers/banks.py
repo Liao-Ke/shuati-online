@@ -112,7 +112,7 @@ def _do_import_one(data: BankImport, user: User, db: Session) -> BankOut:
             analysis=q.analysis or None, sort_order=i,
         )
         db.add(question)
-    db.commit()
+    db.flush()
     db.refresh(bank)
     return BankOut(
         id=bank.id, title=bank.title, description=bank.description,
@@ -128,6 +128,7 @@ def import_bank(data: BankImport, user: User = Depends(get_current_user), db: Se
     if errors:
         raise HTTPException(status_code=400, detail="; ".join(errors))
     result = _do_import_one(data, user, db)
+    db.commit()
     logger.info(f"用户 {user.id} 导入题库：{result.title}，{result.question_count} 题")
     return result
 
@@ -147,18 +148,21 @@ def import_banks_multiple(
                 error="; ".join(errors),
             ))
             continue
+        savepoint = db.begin_nested()
         try:
             out = _do_import_one(item, user, db)
+            savepoint.commit()
             results.append(ImportResult(
                 success=True, title=out.title,
                 question_count=out.question_count,
             ))
         except Exception as e:
-            db.rollback()
+            savepoint.rollback()
             results.append(ImportResult(
                 success=False, title=item.title,
                 error=str(e),
             ))
+    db.commit()
     return BatchImportResponse(results=results)
 
 

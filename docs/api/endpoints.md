@@ -187,6 +187,8 @@
 
 部分失败不影响其他题库。失败原因在 `error` 字段中。
 
+事务隔离：每个题库导入使用独立 savepoint，失败的单独回滚，成功的保留，循环结束后统一 commit。
+
 ---
 
 ### DELETE /api/question-banks/:id
