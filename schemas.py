@@ -1,5 +1,5 @@
 
-from pydantic import BaseModel, field_validator
+from pydantic import BaseModel, Field, field_validator
 
 
 class UserRegister(BaseModel):
@@ -75,7 +75,7 @@ class ExamStart(BaseModel):
     bank_ids: list[int]
     mode: str
     types: list[str] | None = None
-    question_count: int | None = None
+    question_count: int | None = Field(default=None, ge=1)
     timer_mode: str = "per_question"
     chapters: list[str] | None = None
     choice_timeout: int = 30
