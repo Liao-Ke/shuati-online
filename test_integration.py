@@ -912,3 +912,53 @@ def test_49_token_beyond_leeway_rejected(client):
     }, SECRET_KEY, algorithm=ALGORITHM)
     r = client.get("/api/question-banks", headers={"Authorization": f"Bearer {token}"})
     assert r.status_code == 401, "token expired beyond leeway should be rejected"
+
+
+# ── Test: 选项空白校验（issue #49）──
+
+
+def test_50_import_bank_rejects_blank_choice_option(client, auth_headers):
+    data = {
+        "title": "空白选项题库",
+        "questions": [
+            {"type": "choice", "content": "空白选项", "options": ["A.有效", "   "], "answer": "A"},
+        ],
+    }
+    r = client.post("/api/question-banks/import", json=data, headers=auth_headers)
+    assert r.status_code == 400
+    assert "空白" in r.text
+
+
+def test_51_import_bank_rejects_blank_multiple_option(client, auth_headers):
+    data = {
+        "title": "空白多选选项",
+        "questions": [
+            {"type": "multiple", "content": "多选空白", "options": ["A.x", "B.y", ""], "answer": ["A", "B"]},
+        ],
+    }
+    r = client.post("/api/question-banks/import", json=data, headers=auth_headers)
+    assert r.status_code == 400
+    assert "空白" in r.text
+
+
+def test_52_create_question_rejects_blank_option(client, auth_headers):
+    r = client.post(f"/api/question-banks/{state.bank_id}/questions", json={
+        "type": "choice", "content": "新建空白选项",
+        "options": ["A.1", "  "], "answer": "A",
+    }, headers=auth_headers)
+    assert r.status_code == 400
+    assert "空白" in r.text
+
+
+def test_53_update_question_rejects_blank_option(client, auth_headers):
+    r = client.post(f"/api/question-banks/{state.bank_id}/questions", json={
+        "type": "choice", "content": "待更新空白选项",
+        "options": ["A.1", "B.2"], "answer": "A",
+    }, headers=auth_headers)
+    assert r.status_code == 201
+    qid = r.json()["id"]
+    r = client.put(f"/api/questions/{qid}", json={
+        "options": ["A.1", ""], "answer": "A",
+    }, headers=auth_headers)
+    assert r.status_code == 400
+    assert "空白" in r.text
