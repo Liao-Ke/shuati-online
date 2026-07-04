@@ -912,3 +912,40 @@ def test_49_token_beyond_leeway_rejected(client):
     }, SECRET_KEY, algorithm=ALGORITHM)
     r = client.get("/api/question-banks", headers={"Authorization": f"Bearer {token}"})
     assert r.status_code == 401, "token expired beyond leeway should be rejected"
+
+
+# ── Test: submit_answer 拒绝负耗时（issue #41）──
+
+
+def test_50_submit_answer_rejects_negative_duration(client, auth_headers):
+    """time_spent_seconds 为负数时应在请求解析阶段被拒为 422，不污染考试统计（issue #41）"""
+    r = client.post("/api/exam/start", json={
+        "bank_ids": [state.bank_id], "mode": "sequential",
+        "types": ["choice", "fill", "judge", "multiple"],
+        "choice_timeout": 30, "judge_fill_timeout": 60,
+    }, headers=auth_headers)
+    assert r.status_code == 200
+    exam_id = r.json()["exam_id"]
+
+    r = client.get(f"/api/exam/{exam_id}/current", headers=auth_headers)
+    qid = r.json()["question"]["id"]
+
+    # 负耗时应在 schema 边界被拒，不进入路由逻辑、不写库
+    r = client.post(f"/api/exam/{exam_id}/answer", json={
+        "exam_id": exam_id, "question_id": qid,
+        "user_answer": "B", "time_spent_seconds": -120,
+    }, headers=auth_headers)
+    assert r.status_code == 422, f"负耗时应返回 422，实际 {r.status_code}: {r.text}"
+
+    # 零耗时合法，正常入库
+    r = client.post(f"/api/exam/{exam_id}/answer", json={
+        "exam_id": exam_id, "question_id": qid,
+        "user_answer": "B", "time_spent_seconds": 0,
+    }, headers=auth_headers)
+    assert r.status_code == 200
+
+    # 确认考试总耗时非负
+    r = client.post(f"/api/exam/{exam_id}/finish", json={}, headers=auth_headers)
+    assert r.status_code == 200
+    r = client.get(f"/api/exam/{exam_id}/result", headers=auth_headers)
+    assert r.json()["duration_seconds"] >= 0
