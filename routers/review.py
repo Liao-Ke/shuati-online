@@ -52,7 +52,7 @@ def get_review_questions(
     result = []
     for q in questions:
         status = record_map.get(q.id)
-        if data.show_reviewing_only and status == "known":
+        if data.show_reviewing_only and status != "reviewing":
             continue
         result.append(_get_question_out(q, status))
 
