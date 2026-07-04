@@ -1392,7 +1392,7 @@ function resumeExam() {
 }
 
 async function finishExam() {
-  if (!confirm('确定要提前结束吗？未答的题目将不计入成绩。')) return;
+  if (!confirm('确定要提前结束吗？未答的题目将计为错误。')) return;
   if (examPaused) resumeExam();
   clearInterval(examTimerInterval);
   if (examElapsedInterval) clearInterval(examElapsedInterval);
