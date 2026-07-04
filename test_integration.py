@@ -785,6 +785,19 @@ def test_bracket_answer_submit_wrong(client, auth_headers):
     client.post(f"/api/exam/{exam_id}/finish", json={}, headers=auth_headers)
 
 
+def test_bracket_answer_update_question(client, auth_headers):
+    r = client.get(f"/api/question-banks/{state._bracket_bank_id}", headers=auth_headers)
+    assert r.status_code == 200
+    questions = r.json()["questions"]
+    q = next(q for q in questions if q["content"] == "氢离子的化学式是____")
+    r = client.put(f"/api/questions/{q['id']}", json={
+        "analysis": "氢离子化学式为 H⁺",
+    }, headers=auth_headers)
+    assert r.status_code == 200
+    assert r.json()["answer"] == "[H⁺]"
+    assert r.json()["analysis"] == "氢离子化学式为 H⁺"
+
+
 def test_bracket_answer_export(client, auth_headers):
     r = client.get(f"/api/question-banks/{state._bracket_bank_id}/export", headers=auth_headers)
     assert r.status_code == 200
