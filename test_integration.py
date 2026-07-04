@@ -912,3 +912,49 @@ def test_49_token_beyond_leeway_rejected(client):
     }, SECRET_KEY, algorithm=ALGORITHM)
     r = client.get("/api/question-banks", headers={"Authorization": f"Bearer {token}"})
     assert r.status_code == 401, "token expired beyond leeway should be rejected"
+
+
+def test_50_submit_answer_path_body_mismatch(client, auth_headers):
+    """路径 exam_id 与请求体 exam_id 不一致时返回 400，答案不写入（issue #46）"""
+    bank = {
+        "title": "issue46题库",
+        "questions": [
+            {"type": "choice", "chapter": "基础", "content": "1+1=?", "options": ["A.1", "B.2"], "answer": "B"},
+        ],
+    }
+    r = client.post("/api/question-banks/import", json=bank, headers=auth_headers)
+    assert r.status_code == 201, f"导入失败: {r.text}"
+    bank_id = r.json()["id"]
+
+    start_body = {
+        "bank_ids": [bank_id], "mode": "sequential",
+        "types": ["choice"], "choice_timeout": 30, "judge_fill_timeout": 60,
+    }
+    r = client.post("/api/exam/start", json=start_body, headers=auth_headers)
+    assert r.status_code == 200
+    exam_a = r.json()["exam_id"]
+    r = client.post("/api/exam/start", json=start_body, headers=auth_headers)
+    assert r.status_code == 200
+    exam_b = r.json()["exam_id"]
+
+    r = client.get(f"/api/exam/{exam_a}/current", headers=auth_headers)
+    qid = r.json()["question"]["id"]
+
+    # 路径 examB + 请求体 examA → 400，答案不写入任何考试
+    r = client.post(f"/api/exam/{exam_b}/answer", json={
+        "exam_id": exam_a, "question_id": qid,
+        "user_answer": "B", "time_spent_seconds": 3,
+    }, headers=auth_headers)
+    assert r.status_code == 400, f"路径/请求体不一致应返回 400: {r.text}"
+    assert "不一致" in r.json()["detail"]
+
+    # examA 进度仍为空，未被写入
+    r = client.get(f"/api/exam/{exam_a}/progress", headers=auth_headers)
+    assert r.json()["answers"] == []
+
+    # 路径与请求体一致 → 200（向后兼容，正常受理）
+    r = client.post(f"/api/exam/{exam_a}/answer", json={
+        "exam_id": exam_a, "question_id": qid,
+        "user_answer": "B", "time_spent_seconds": 3,
+    }, headers=auth_headers)
+    assert r.status_code == 200, f"一致时应正常受理: {r.text}"
