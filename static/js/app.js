@@ -1153,7 +1153,9 @@ async function startExam() {
     examStartedAt = res.started_at.endsWith('Z') ? res.started_at : res.started_at + 'Z';
     examElapsedOffset = 0;
     examCurrentIndex = 0;
+    examFullPreview = false;
     sessionStorage.removeItem('examCurrentIndex');
+    sessionStorage.removeItem('examMode');
     sessionStorage.setItem('activeExamId', examId);
     sessionStorage.setItem('examTimerMode', examTimerMode);
     sessionStorage.setItem('examStartedAt', examStartedAt);
@@ -2291,7 +2293,9 @@ async function startWrongPractice() {
     examStartedAt = new Date().toISOString();
     examElapsedOffset = 0;
     examCurrentIndex = 0;
+    examFullPreview = false;
     sessionStorage.removeItem('examCurrentIndex');
+    sessionStorage.removeItem('examMode');
     sessionStorage.setItem('activeExamId', examId);
     sessionStorage.setItem('examTimerMode', examTimerMode);
     sessionStorage.setItem('examStartedAt', examStartedAt);
