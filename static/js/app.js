@@ -528,6 +528,7 @@ router.add('/result/:id', async ({ id }) => {
   sessionStorage.removeItem('examMode');
   sessionStorage.removeItem('examTimerMode');
   sessionStorage.removeItem('examStartedAt');
+  sessionStorage.removeItem('examTimeouts');
   showNav();
   render('<div class="text-center py-5"><div class="spinner-border"></div></div>');
   try {
@@ -1144,6 +1145,7 @@ async function startExam() {
   const questionCount = allQuestions ? null : parseInt(document.getElementById('question-count-input').value) || null;
   const timerMode = document.querySelector('[data-timer].active')?.dataset.timer || 'per_question';
   const choiceTimeout = parseInt(document.getElementById('timeout-choice').value) || 30;
+  const multiTimeout = parseInt(document.getElementById('timeout-multi').value) || 45;
   const fillTimeout = parseInt(document.getElementById('timeout-fill').value) || 60;
   const chapters = [...document.querySelectorAll('.exam-chapter-filter:checked')].map(cb => cb.value);
   try {
@@ -1161,6 +1163,7 @@ async function startExam() {
     sessionStorage.setItem('examTimerMode', examTimerMode);
     sessionStorage.setItem('examStartedAt', examStartedAt);
     sessionStorage.setItem('examElapsedOffset', '0');
+    sessionStorage.setItem('examTimeouts', JSON.stringify({ choice: choiceTimeout, multi: multiTimeout, fill: fillTimeout }));
     router.navigate('/exam');
   } catch (err) {
     alert(err.message);
@@ -1277,11 +1280,12 @@ async function loadQuestionByIndex(index) {
     const isChoice = q.type === 'choice';
     const isMultiple = q.type === 'multiple';
     if (examTimerMode !== 'elapsed') {
+      const timeouts = JSON.parse(sessionStorage.getItem('examTimeouts') || '{}');
       examTimeoutSeconds = isChoice
-        ? (parseInt(document.getElementById('timeout-choice')?.value) || 30)
+        ? (timeouts.choice || 30)
         : (isMultiple
-          ? (parseInt(document.getElementById('timeout-multi')?.value) || 45)
-          : (parseInt(document.getElementById('timeout-fill')?.value) || 60));
+          ? (timeouts.multi || 45)
+          : (timeouts.fill || 60));
       state.questionStartTime = Date.now();
     }
 
@@ -1408,6 +1412,7 @@ async function finishExam() {
     sessionStorage.removeItem('examTimerMode');
     sessionStorage.removeItem('examStartedAt');
     sessionStorage.removeItem('examElapsedOffset');
+    sessionStorage.removeItem('examTimeouts');
     document.removeEventListener('keydown', examKeyHandler);
     router.navigate(`/result/${examId}`);
   } catch (err) {
@@ -2301,6 +2306,7 @@ async function startWrongPractice() {
     examFullPreview = false;
     sessionStorage.removeItem('examCurrentIndex');
     sessionStorage.removeItem('examMode');
+    sessionStorage.removeItem('examTimeouts');
     sessionStorage.setItem('activeExamId', examId);
     sessionStorage.setItem('examTimerMode', examTimerMode);
     sessionStorage.setItem('examStartedAt', examStartedAt);
