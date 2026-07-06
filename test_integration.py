@@ -971,3 +971,99 @@ def test_50_submit_answer_path_body_mismatch(client, auth_headers):
         "user_answer": "B", "time_spent_seconds": 3,
     }, headers=auth_headers)
     assert r.status_code == 200, f"一致时应正常受理: {r.text}"
+
+
+# ── Test: 答案必须属于现有选项（issue #42）──
+
+
+def test_51_import_rejects_choice_answer_not_in_options(client, auth_headers):
+    """选择题答案不属于现有选项标签时，导入返回 400（issue #42）"""
+    data = {
+        "title": "必错题测试",
+        "questions": [
+            {"type": "choice", "content": "1+1=?", "options": ["1", "4"], "answer": "C"},
+        ],
+    }
+    r = client.post("/api/question-banks/import", json=data, headers=auth_headers)
+    assert r.status_code == 400
+    assert "不属于现有选项" in r.text
+
+
+def test_52_import_rejects_multiple_answer_not_in_options(client, auth_headers):
+    """多选题答案含超出选项范围的标签时，导入返回 400（issue #42）"""
+    data = {
+        "title": "多选必错题",
+        "questions": [
+            {"type": "multiple", "content": "哪些是偶数？", "options": ["2", "4"], "answer": ["A", "C"]},
+        ],
+    }
+    r = client.post("/api/question-banks/import", json=data, headers=auth_headers)
+    assert r.status_code == 400
+    assert "不属于现有选项" in r.text
+
+
+def test_53_import_rejects_multiple_duplicate_answer(client, auth_headers):
+    """多选题答案含重复标签时，导入返回 400（issue #42）"""
+    data = {
+        "title": "重复答案",
+        "questions": [
+            {"type": "multiple", "content": "哪些是偶数？", "options": ["2", "4", "6"], "answer": ["A", "A"]},
+        ],
+    }
+    r = client.post("/api/question-banks/import", json=data, headers=auth_headers)
+    assert r.status_code == 400
+    assert "重复" in r.text
+
+
+def test_54_create_question_rejects_choice_answer_not_in_options(client, auth_headers):
+    """新建选择题答案不属于现有选项时返回 400（issue #42）"""
+    r = client.post(f"/api/question-banks/{state.bank_id}/questions", json={
+        "type": "choice", "content": "test", "options": ["1", "2"], "answer": "D",
+    }, headers=auth_headers)
+    assert r.status_code == 400
+    assert "不属于现有选项" in r.text
+
+
+def test_55_create_question_rejects_multiple_answer_not_in_options(client, auth_headers):
+    """新建多选题答案含超出选项范围的标签时返回 400（issue #42）"""
+    r = client.post(f"/api/question-banks/{state.bank_id}/questions", json={
+        "type": "multiple", "content": "test", "options": ["1", "2"], "answer": ["A", "C"],
+    }, headers=auth_headers)
+    assert r.status_code == 400
+    assert "不属于现有选项" in r.text
+
+
+def test_56_update_question_rejects_choice_answer_not_in_options(client, auth_headers):
+    """编辑选择题答案不属于现有选项时返回 400（issue #42）"""
+    r = client.post(f"/api/question-banks/{state.bank_id}/questions", json={
+        "type": "choice", "content": "合法题", "options": ["1", "2"], "answer": "A",
+    }, headers=auth_headers)
+    assert r.status_code == 201
+    qid = r.json()["id"]
+    r = client.put(f"/api/questions/{qid}", json={"answer": "Z"}, headers=auth_headers)
+    assert r.status_code == 400
+    assert "不属于现有选项" in r.text
+    client.delete(f"/api/questions/{qid}", headers=auth_headers)
+
+
+def test_57_import_multiple_rejects_invalid_answer(client, auth_headers):
+    """批量导入时某题库含非法答案，该条失败但不影响其他条（issue #42）"""
+    data = [
+        {"title": "合法批量42", "questions": [
+            {"type": "choice", "content": "1+1=?", "options": ["1", "2"], "answer": "B"},
+        ]},
+        {"title": "非法批量42", "questions": [
+            {"type": "choice", "content": "x", "options": ["1", "2"], "answer": "C"},
+        ]},
+    ]
+    r = client.post("/api/question-banks/import-multiple", json=data, headers=auth_headers)
+    assert r.status_code == 200
+    results = r.json()["results"]
+    assert results[0]["success"] is True
+    assert results[1]["success"] is False
+    assert "不属于现有选项" in results[1]["error"]
+    r = client.get("/api/question-banks", headers=auth_headers)
+    for b in r.json():
+        if b["title"] == "合法批量42":
+            client.delete(f"/api/question-banks/{b['id']}", headers=auth_headers)
+            break
