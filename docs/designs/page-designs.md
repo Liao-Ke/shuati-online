@@ -129,7 +129,7 @@
       "type": "choice",
       "chapter": "第一章 基础",
       "content": "中国的首都是？",
-      "options": ["A. 上海", "B. 北京", "C. 广州", "D. 深圳"],
+      "options": ["上海", "北京", "广州", "深圳"],
       "answer": "B",
       "analysis": "北京是中国的首都。"
     },
