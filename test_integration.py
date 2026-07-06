@@ -1368,3 +1368,36 @@ def test_71b_review_null_types_returns_all(client, auth_headers):
     }, headers=auth_headers)
     assert r.status_code == 200
     assert len(r.json()) >= 1
+
+
+# ── Test: 章节空列表过滤（issue #91）──
+
+
+def test_69_exam_start_empty_chapters_returns_400(client, auth_headers):
+    """chapters=[] 应返回 400（空集合匹配不到任何题目），而非泄漏全部章节"""
+    r = client.post("/api/exam/start", json={
+        "bank_ids": [state.bank_id], "mode": "sequential",
+        "chapters": [],
+        "choice_timeout": 30, "judge_fill_timeout": 60,
+    }, headers=auth_headers)
+    assert r.status_code == 400
+    assert "没有符合条件的题目" in r.text
+
+
+def test_70_review_empty_chapters_returns_empty(client, auth_headers):
+    """chapters=[] 应返回空列表，而非泄漏全部章节"""
+    r = client.post("/api/review/questions", json={
+        "bank_ids": [state.bank_id],
+        "chapters": [],
+    }, headers=auth_headers)
+    assert r.status_code == 200
+    assert r.json() == []
+
+
+def test_71_review_null_chapters_returns_all(client, auth_headers):
+    """chapters 未传（None）应保持向后兼容，返回全部章节题目"""
+    r = client.post("/api/review/questions", json={
+        "bank_ids": [state.bank_id],
+    }, headers=auth_headers)
+    assert r.status_code == 200
+    assert len(r.json()) >= 1
