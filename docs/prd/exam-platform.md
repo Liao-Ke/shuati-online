@@ -110,7 +110,7 @@
 |------|----------|------|
 | bank_ids | JSON 数组字符串 | `"[1,2,3]"` |
 | question_ids | JSON 数组字符串或 null | `"[4,7,12]"` |
-| question.options | JSON 数组字符串或 null | `'["A. 1","B. 2","C. 3"]'` |
+| question.options | JSON 数组字符串或 null | `'["1","2","3"]'` |
 | question.answer | 普通字符串或 JSON 数组字符串 | `"B"` / `'["造纸术","印刷术"]'` |
 | user_answer | 普通字符串或 JSON 数组字符串 | `"B"` / `'["造纸术","印刷术"]'` |
 

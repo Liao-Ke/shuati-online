@@ -13,11 +13,11 @@ BANK_DATA = {
     "title": "测试题库",
     "description": "这是一个测试",
     "questions": [
-        {"type": "choice", "chapter": "基础", "content": "1+1=?", "options": ["A.1", "B.2", "C.3", "D.4"], "answer": "B"},
+        {"type": "choice", "chapter": "基础", "content": "1+1=?", "options": ["1", "2", "3", "4"], "answer": "B"},
         {"type": "fill", "chapter": "基础", "content": "中国的首都是____", "answer": "北京"},
         {"type": "fill", "chapter": "进阶", "content": "四大发明是____、____、____和____", "answer": ["造纸术", "印刷术", "火药", "指南针"]},
         {"type": "judge", "chapter": "基础", "content": "地球是圆的", "answer": "对"},
-        {"type": "multiple", "chapter": "基础", "content": "以下哪些是数字？", "options": ["A. 一", "B. 二", "C. 三", "D. 四"], "answer": ["A", "B", "C", "D"]},
+        {"type": "multiple", "chapter": "基础", "content": "以下哪些是数字？", "options": ["一", "二", "三", "四"], "answer": ["A", "B", "C", "D"]},
     ],
 }
 
@@ -114,6 +114,17 @@ def test_02_import_bank(client, auth_headers):
     assert r.json()["question_count"] == 5
 
 
+def test_02b_import_bank_options_no_prefix(client, auth_headers):
+    """验证导入后 choice/multiple 题的 options 不包含字母前缀（回归 #51）"""
+    r = client.get(f"/api/question-banks/{state.bank_id}", headers=auth_headers)
+    assert r.status_code == 200
+    for q in r.json()["questions"]:
+        if q["type"] in ("choice", "multiple"):
+            for opt in q.get("options") or []:
+                import re
+                assert not re.match(r"^[A-Z]\.", opt), f"选项 '{opt}' 包含多余字母前缀"
+
+
 def test_03_list_banks(client, auth_headers):
     r = client.get("/api/question-banks", headers=auth_headers)
     assert r.status_code == 200
@@ -123,10 +134,10 @@ def test_03_list_banks(client, auth_headers):
 def test_03b_import_multiple(client, auth_headers):
     data = [
         {"title": "批量题库A", "questions": [
-            {"type": "choice", "content": "2+2=?", "options": ["A.3", "B.4"], "answer": "B"},
+            {"type": "choice", "content": "2+2=?", "options": ["3", "4"], "answer": "B"},
         ]},
         {"title": "", "questions": [
-            {"type": "choice", "content": "x", "options": ["A.1"], "answer": "A"},
+            {"type": "choice", "content": "x", "options": ["1"], "answer": "A"},
         ]},
     ]
     r = client.post("/api/question-banks/import-multiple", json=data, headers=auth_headers)
@@ -145,13 +156,13 @@ def test_03b_import_multiple(client, auth_headers):
 def test_03c_import_multiple_db_failure(client, auth_headers):
     data = [
         {"title": "DB隔离A", "questions": [
-            {"type": "choice", "content": "1+1=?", "options": ["A.1", "B.2"], "answer": "B"},
+            {"type": "choice", "content": "1+1=?", "options": ["1", "2"], "answer": "B"},
         ]},
         {"title": "DB隔离B-失败", "questions": [
-            {"type": "choice", "content": "x", "options": ["A.1", "B.2"], "answer": "A"},
+            {"type": "choice", "content": "x", "options": ["1", "2"], "answer": "A"},
         ]},
         {"title": "DB隔离C", "questions": [
-            {"type": "choice", "content": "3+3=?", "options": ["A.5", "B.6"], "answer": "B"},
+            {"type": "choice", "content": "3+3=?", "options": ["5", "6"], "answer": "B"},
         ]},
     ]
 
@@ -651,7 +662,7 @@ def test_28_review_type_filter_multiple(client, auth_headers):
 def test_29_create_question_choice(client, auth_headers):
     r = client.post(f"/api/question-banks/{state.bank_id}/questions", json={
         "type": "choice", "chapter": "新章节", "content": "1+2=?",
-        "options": ["A.1", "B.2", "C.3", "D.4"], "answer": "C",
+        "options": ["1", "2", "3", "4"], "answer": "C",
     }, headers=auth_headers)
     assert r.status_code == 201
     data = r.json()
@@ -688,7 +699,7 @@ def test_32_create_question_judge(client, auth_headers):
 def test_33_create_question_multiple(client, auth_headers):
     r = client.post(f"/api/question-banks/{state.bank_id}/questions", json={
         "type": "multiple", "content": "以下哪些是数字？",
-        "options": ["A.一", "B.二", "C.三", "D.四"], "answer": ["A", "B"],
+        "options": ["一", "二", "三", "四"], "answer": ["A", "B"],
     }, headers=auth_headers)
     assert r.status_code == 201
     state._q_multi_id = r.json()["id"]
@@ -696,7 +707,7 @@ def test_33_create_question_multiple(client, auth_headers):
 
 def test_34_create_question_validation_error(client, auth_headers):
     r = client.post(f"/api/question-banks/{state.bank_id}/questions", json={
-        "type": "choice", "content": "test", "options": ["A.1"], "answer": "A",
+        "type": "choice", "content": "test", "options": ["1"], "answer": "A",
     }, headers=auth_headers)
     assert r.status_code == 400
 
@@ -704,7 +715,7 @@ def test_34_create_question_validation_error(client, auth_headers):
 def test_35_create_question_nonexistent_bank(client, auth_headers):
     r = client.post("/api/question-banks/99999/questions", json={
         "type": "choice", "content": "test",
-        "options": ["A.1", "B.2"], "answer": "A",
+        "options": ["1", "2"], "answer": "A",
     }, headers=auth_headers)
     assert r.status_code == 404
 
@@ -912,3 +923,51 @@ def test_49_token_beyond_leeway_rejected(client):
     }, SECRET_KEY, algorithm=ALGORITHM)
     r = client.get("/api/question-banks", headers={"Authorization": f"Bearer {token}"})
     assert r.status_code == 401, "token expired beyond leeway should be rejected"
+
+
+def test_50_submit_answer_path_body_mismatch(client, auth_headers):
+    """路径 exam_id 与请求体 exam_id 不一致时返回 400，答案不写入（issue #46）"""
+    bank = {
+        "title": "issue46题库",
+        "questions": [
+            {"type": "choice", "chapter": "基础", "content": "1+1=?", "options": ["A.1", "B.2"], "answer": "B"},
+        ],
+    }
+    r = client.post("/api/question-banks/import", json=bank, headers=auth_headers)
+    assert r.status_code == 201, f"导入失败: {r.text}"
+    bank_id = r.json()["id"]
+
+    start_body = {
+        "bank_ids": [bank_id], "mode": "sequential",
+        "types": ["choice"], "choice_timeout": 30, "judge_fill_timeout": 60,
+    }
+    r = client.post("/api/exam/start", json=start_body, headers=auth_headers)
+    assert r.status_code == 200
+    exam_a = r.json()["exam_id"]
+    r = client.post("/api/exam/start", json=start_body, headers=auth_headers)
+    assert r.status_code == 200
+    exam_b = r.json()["exam_id"]
+
+    r = client.get(f"/api/exam/{exam_a}/current", headers=auth_headers)
+    qid = r.json()["question"]["id"]
+
+    # 路径 examB + 请求体 examA → 400，答案不写入任何考试
+    r = client.post(f"/api/exam/{exam_b}/answer", json={
+        "exam_id": exam_a, "question_id": qid,
+        "user_answer": "B", "time_spent_seconds": 3,
+    }, headers=auth_headers)
+    assert r.status_code == 400, f"路径/请求体不一致应返回 400: {r.text}"
+    assert "不一致" in r.json()["detail"]
+
+    # 两场考试进度均为空，未被写入
+    r = client.get(f"/api/exam/{exam_a}/progress", headers=auth_headers)
+    assert r.json()["answers"] == []
+    r = client.get(f"/api/exam/{exam_b}/progress", headers=auth_headers)
+    assert r.json()["answers"] == []
+
+    # 路径与请求体一致 → 200（向后兼容，正常受理）
+    r = client.post(f"/api/exam/{exam_a}/answer", json={
+        "exam_id": exam_a, "question_id": qid,
+        "user_answer": "B", "time_spent_seconds": 3,
+    }, headers=auth_headers)
+    assert r.status_code == 200, f"一致时应正常受理: {r.text}"
