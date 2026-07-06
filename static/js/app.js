@@ -697,11 +697,11 @@ router.add('/wrong-answers', async () => {
     `);
     if (wrongs.length > 0) {
       const container = document.getElementById('wrong-list');
-      let currentBank = '';
+      let currentBankId = null;
       wrongs.forEach(w => {
-        if (w.bank_title !== currentBank) {
-          currentBank = w.bank_title;
-          container.innerHTML += `<h5 class="mt-3 mb-2">${escHtml(currentBank)}</h5>`;
+        if (w.bank_id !== currentBankId) {
+          currentBankId = w.bank_id;
+          container.innerHTML += `<h5 class="mt-3 mb-2">${escHtml(w.bank_title || '')}</h5>`;
         }
         const userAns = Array.isArray(w.user_answer) ? w.user_answer.join(', ') : w.user_answer || '(未作答)';
         const correctAns = Array.isArray(w.correct_answer) ? w.correct_answer.join(', ') : w.correct_answer;
@@ -2228,11 +2228,11 @@ async function init() {
 async function openWrongPracticeModal() {
   const banks = await api.getBanks();
   const wrongs = await api.getWrongAnswers();
-  const wrongBankTitles = new Set(wrongs.map(w => w.bank_title));
+  const wrongBankIds = new Set(wrongs.map(w => w.bank_id));
 
   let bankCheckboxes = '';
   banks.forEach(b => {
-    const checked = wrongBankTitles.has(b.title) ? 'checked' : '';
+    const checked = wrongBankIds.has(b.id) ? 'checked' : '';
     bankCheckboxes += `
       <div class="col-md-4 col-6">
         <div class="bank-check-card">
