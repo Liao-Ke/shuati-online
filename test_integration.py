@@ -925,6 +925,18 @@ def test_44_cleanup_restore_bank(client, auth_headers):
 # ── Test: JWT hardening ──
 
 
+def test_auth_missing_authorization_returns_401(client):
+    r = client.get("/api/question-banks")
+    assert r.status_code == 401
+    assert r.json()["detail"] == "未认证"
+
+
+def test_auth_wrong_scheme_returns_401(client):
+    r = client.get("/api/question-banks", headers={"Authorization": "Basic abc"})
+    assert r.status_code == 401
+    assert r.json()["detail"] == "未认证"
+
+
 def test_45_wrong_issuer_rejected(client):
     now = datetime.now(UTC).replace(tzinfo=None)
     token = jwt.encode({
