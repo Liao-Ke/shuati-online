@@ -105,7 +105,7 @@
       "type": "choice",
       "chapter": "第一章",
       "content": "1+1=?",
-      "options": "[\"A.1\", \"B.2\", \"C.3\", \"D.4\"]",
+      "options": "[\"1\", \"2\", \"3\", \"4\"]",
       "answer": "B",
       "analysis": "1+1=2",
       "sort_order": 0
@@ -132,7 +132,7 @@
       "type": "choice",
       "chapter": "第一章",
       "content": "1+1=?",
-      "options": ["A.1", "B.2", "C.3", "D.4"],
+      "options": ["1", "2", "3", "4"],
       "answer": "B",
       "analysis": "可选解析"
     },
@@ -242,7 +242,7 @@
       "type": "choice",
       "chapter": "第一章",
       "content": "1+1=?",
-      "options": ["A.1", "B.2", "C.3", "D.4"],
+      "options": ["1", "2", "3", "4"],
       "answer": "B",
       "analysis": "解析"
     }
@@ -264,7 +264,7 @@
   "type": "choice",
   "chapter": "第一章",
   "content": "1+1=?",
-  "options": ["A.1", "B.2", "C.3", "D.4"],
+  "options": ["1", "2", "3", "4"],
   "answer": "B",
   "analysis": "可选解析"
 }
@@ -283,7 +283,7 @@
   "type": "choice",
   "chapter": "第一章",
   "content": "1+1=?",
-  "options": "[\"A.1\", \"B.2\", \"C.3\", \"D.4\"]",
+  "options": "[\"1\", \"2\", \"3\", \"4\"]",
   "answer": "B",
   "analysis": "可选解析",
   "sort_order": 5
@@ -390,7 +390,7 @@
     "type": "choice",
     "chapter": "第一章",
     "content": "1+1=?",
-    "options": "[\"A.1\", \"B.2\", \"C.3\", \"D.4\"]",
+    "options": "[\"1\", \"2\", \"3\", \"4\"]",
     "answer": null,
     "analysis": null,
     "sort_order": 0
@@ -413,7 +413,7 @@
     "type": "choice",
     "chapter": "第一章",
     "content": "1+1=?",
-    "options": "[\"A.1\", \"B.2\", \"C.3\", \"D.4\"]",
+    "options": "[\"1\", \"2\", \"3\", \"4\"]",
     "answer": "B",
     "analysis": "1+1=2",
     "sort_order": 0
@@ -506,7 +506,7 @@
       "type": "choice",
       "chapter": "第一章",
       "content": "1+1=?",
-      "options": ["A.1", "B.2", "C.3", "D.4"],
+      "options": ["1", "2", "3", "4"],
       "answer": "B",
       "analysis": "1+1=2",
       "user_answer": "B",
@@ -546,7 +546,7 @@
       "question_id": 7,
       "type": "choice",
       "content": "1+1=?",
-      "options": ["A.1", "B.2", "C.3", "D.4"],
+      "options": ["1", "2", "3", "4"],
       "correct_answer": "B",
       "user_answer": "B",
       "is_correct": true,
@@ -605,7 +605,7 @@
     "type": "choice",
     "chapter": "第一章",
     "content": "1+1=?",
-    "options": ["A.1", "B.2", "C.3", "D.4"],
+    "options": ["1", "2", "3", "4"],
     "correct_answer": "B",
     "user_answer": "A",
     "analysis": "1+1=2"
@@ -679,7 +679,7 @@
     "type": "choice",
     "chapter": "第一章",
     "content": "1+1=?",
-    "options": "[\"A.1\", \"B.2\", \"C.3\", \"D.4\"]",
+    "options": "[\"1\", \"2\", \"3\", \"4\"]",
     "answer": "B",
     "analysis": "1+1=2",
     "sort_order": 0,

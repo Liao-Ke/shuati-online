@@ -59,7 +59,7 @@
 | `type` | String(10) | NOT NULL | | 题型：`choice` / `fill` / `judge` / `multiple` |
 | `chapter` | String(200) | NULLABLE | | 章节名称，如"第一章 基础" |
 | `content` | Text | NOT NULL | | 题目正文，填空用 `____` 占位 |
-| `options` | Text | NULLABLE | | JSON 数组字符串，如 `'["A.1","B.2"]'`；choice/multiple 使用，fill/judge 为 null |
+| `options` | Text | NULLABLE | | JSON 数组字符串，如 `'["1","2"]'`；choice/multiple 使用，fill/judge 为 null |
 | `answer` | Text | NOT NULL | | 单空/判断为普通字符串；多空/multiple 为 JSON 数组字符串 |
 | `analysis` | Text | NULLABLE | | 题目解析 |
 | `sort_order` | Integer | | 0 | 排序序号，同一题库内按此字段+ID 排序 |
