@@ -118,7 +118,7 @@ docker compose up -d
       "type": "choice",
       "chapter": "第一章",
       "content": "题目内容",
-      "options": ["A. 选项一", "B. 选项二", "C. 选项三", "D. 选项四"],
+      "options": ["选项一", "选项二", "选项三", "选项四"],
       "answer": "B",
       "analysis": "解析内容（可选）"
     },
@@ -136,7 +136,7 @@ docker compose up -d
       "type": "multiple",
       "chapter": "第一章",
       "content": "多选题内容",
-      "options": ["A. 选项一", "B. 选项二", "C. 选项三", "D. 选项四"],
+      "options": ["选项一", "选项二", "选项三", "选项四"],
       "answer": ["A", "C"],
       "analysis": "解析内容（可选）"
     }
