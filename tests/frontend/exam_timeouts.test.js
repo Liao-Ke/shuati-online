@@ -7,11 +7,27 @@ const vm = require('node:vm');
 function loadHelpers() {
   const source = fs.readFileSync(path.join(__dirname, '../../static/js/app.js'), 'utf8');
   const storage = new Map();
+  const documentStub = {
+    elements: new Map(),
+    queryResults: new Map(),
+    addEventListener() {},
+    querySelector() { return null; },
+    querySelectorAll(selector) {
+      const results = this.queryResults.get(selector) || [];
+      if (selector.endsWith(':checked')) return results.filter(el => el.checked);
+      if (selector.includes('.selected')) return results.filter(el => el.classList?.contains('selected'));
+      return results;
+    },
+    getElementById(id) {
+      if (!this.elements.has(id)) this.elements.set(id, { textContent: '', style: {}, value: '1', max: '1', innerHTML: '' });
+      return this.elements.get(id);
+    },
+  };
   const context = {
     console,
     location: { hash: '' },
     window: { addEventListener() {}, removeEventListener() {} },
-    document: { addEventListener() {}, querySelector() { return null; }, querySelectorAll() { return []; }, getElementById() { return null; } },
+    document: documentStub,
     sessionStorage: {
       getItem(key) { return storage.has(key) ? storage.get(key) : null; },
       setItem(key, value) { storage.set(key, String(value)); },
@@ -22,8 +38,24 @@ function loadHelpers() {
   vm.createContext(context);
   vm.runInContext(`${source}\n__exports.saveExamTimeouts = saveExamTimeouts;\n__exports.getExamTimeoutSeconds = getExamTimeoutSeconds;
 __exports.formatBankDisplayName = formatBankDisplayName;
-__exports.isWrongPracticeBankChecked = isWrongPracticeBankChecked;`, context);
-  return { ...context.__exports, sessionStorage: context.sessionStorage };
+__exports.isWrongPracticeBankChecked = isWrongPracticeBankChecked;
+__exports.toggleBankSelect = toggleBankSelect;
+__exports.toggleReviewBankSelect = toggleReviewBankSelect;`, context);
+  return { ...context.__exports, sessionStorage: context.sessionStorage, document: context.document };
+}
+
+function makeCard(selector, checked = false, questionCount = '3') {
+  const cb = { checked, value: '1' };
+  const classes = new Set();
+  const card = {
+    dataset: { questionCount },
+    querySelector(query) { return query === selector ? cb : null; },
+    classList: {
+      toggle(name, force) { force ? classes.add(name) : classes.delete(name); },
+      contains(name) { return classes.has(name); },
+    },
+  };
+  return { card, cb };
 }
 
 test('exam timeout helpers persist and read custom per-question durations', () => {
@@ -63,4 +95,44 @@ test('wrong answer bank helpers distinguish same-title banks by id', () => {
   assert.equal(formatBankDisplayName(second.title, second.id), '同名题库 #202');
   assert.equal(isWrongPracticeBankChecked(first, wrongBankIds), true);
   assert.equal(isWrongPracticeBankChecked(second, wrongBankIds), false);
+});
+
+
+test('bank card selection stays in sync when clicking checkbox or card body', () => {
+  const { toggleBankSelect, document } = loadHelpers();
+  const { card, cb } = makeCard('.bank-checkbox', true);
+
+  document.queryResults.set('.bank-checkbox:checked', [cb]);
+  document.queryResults.set('.bank-check-card.selected', [card]);
+
+  toggleBankSelect(card, { target: cb });
+
+  assert.equal(cb.checked, true);
+  assert.equal(card.classList.contains('selected'), true);
+  assert.equal(document.getElementById('selected-count').textContent, '已选 1 个题库');
+
+  toggleBankSelect(card, { target: card });
+
+  assert.equal(cb.checked, false);
+  assert.equal(card.classList.contains('selected'), false);
+  assert.equal(document.getElementById('selected-count').textContent, '已选 0 个题库');
+});
+
+test('review bank card selection stays in sync when clicking checkbox or card body', () => {
+  const { toggleReviewBankSelect, document } = loadHelpers();
+  const { card, cb } = makeCard('.review-bank-checkbox', true);
+
+  document.queryResults.set('.review-bank-checkbox:checked', [cb]);
+
+  toggleReviewBankSelect(card, { target: cb });
+
+  assert.equal(cb.checked, true);
+  assert.equal(card.classList.contains('selected'), true);
+  assert.equal(document.getElementById('review-selected-count').textContent, '已选 1 个题库');
+
+  toggleReviewBankSelect(card, { target: card });
+
+  assert.equal(cb.checked, false);
+  assert.equal(card.classList.contains('selected'), false);
+  assert.equal(document.getElementById('review-selected-count').textContent, '已选 0 个题库');
 });
