@@ -724,7 +724,7 @@ router.add('/wrong-answers', async () => {
       wrongs.forEach(w => {
         if (w.bank_id !== currentBankId) {
           currentBankId = w.bank_id;
-          container.innerHTML += `<h5 class="mt-3 mb-2">${escHtml(w.bank_title || '')}</h5>`;
+          container.innerHTML += `<h5 class="mt-3 mb-2">${escHtml(formatBankDisplayName(w.bank_title, w.bank_id))}</h5>`;
         }
         const userAns = Array.isArray(w.user_answer) ? w.user_answer.join(', ') : w.user_answer || '(未作答)';
         const correctAns = Array.isArray(w.correct_answer) ? w.correct_answer.join(', ') : w.correct_answer;
@@ -1105,6 +1105,15 @@ function escHtml(s) {
   const div = document.createElement('div');
   div.textContent = s;
   return div.innerHTML;
+}
+
+function formatBankDisplayName(title, id) {
+  const name = title || '未命名题库';
+  return id == null ? name : `${name} #${id}`;
+}
+
+function isWrongPracticeBankChecked(bank, wrongBankIds) {
+  return wrongBankIds.has(bank.id);
 }
 
 function logout() {
@@ -2258,13 +2267,13 @@ async function openWrongPracticeModal() {
 
   let bankCheckboxes = '';
   banks.forEach(b => {
-    const checked = wrongBankIds.has(b.id) ? 'checked' : '';
+    const checked = isWrongPracticeBankChecked(b, wrongBankIds) ? 'checked' : '';
     bankCheckboxes += `
       <div class="col-md-4 col-6">
         <div class="bank-check-card">
           <div class="form-check">
             <input type="checkbox" class="form-check-input wrong-practice-bank" value="${b.id}" ${checked}>
-            <label class="form-check-label">${escHtml(b.title)} <span class="text-muted">(${b.question_count} 题)</span></label>
+            <label class="form-check-label">${escHtml(formatBankDisplayName(b.title, b.id))} <span class="text-muted">(${b.question_count} 题)</span></label>
           </div>
         </div>
       </div>`;

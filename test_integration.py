@@ -365,8 +365,9 @@ def test_07f_wrong_answers_same_title_distinct_bank_id(client, auth_headers):
     same_title = [w for w in wrongs if w.get("bank_title") == "测试题库"]
     assert len(same_title) >= 1
     bank_ids = {w["bank_id"] for w in same_title}
-    # 至少应包含第二个题库的 id，且 bank_id 字段非空
-    assert second_bank_id in bank_ids, "同名题库的错题应能通过 bank_id 识别来源"
+    assert state.bank_id in bank_ids, "原同名题库的错题应保留来源 bank_id"
+    assert second_bank_id in bank_ids, "第二个同名题库的错题应能通过 bank_id 识别来源"
+    assert len(bank_ids) >= 2, "同名题库不应再被 bank_title 混成一个来源"
     assert all(w["bank_id"] for w in same_title), "bank_id 不应为空"
 
     # 清理第二个题库，避免影响后续 test_14_verify_delete 的 0 题库断言
