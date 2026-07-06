@@ -379,6 +379,22 @@ def test_07e_wrong_practice_no_wrong_questions(client, auth_headers):
     assert r.status_code == 400, f"无错题应返回 400: {r.text}"
 
 
+def test_07g_wrong_practice_rejects_invalid_timer_mode(client, auth_headers):
+    """非法 timer_mode 应在请求解析阶段被拒为 422，与 /api/exam/start 行为一致 (#48)"""
+    r = client.post("/api/wrong-answers/start", json={
+        "timer_mode": "bad_mode",
+    }, headers=auth_headers)
+    assert r.status_code == 422, f"非法 timer_mode 应返回 422: {r.text}"
+    # 合法值不应被 422 拦截（无错题时为 400 业务错误，有错题时为 200，均非 422）
+    r = client.post("/api/wrong-answers/start", json={
+        "timer_mode": "elapsed",
+    }, headers=auth_headers)
+    assert r.status_code != 422, f"elapsed 为合法值不应被 422 拦截: {r.text}"
+    # 清理：若成功创建考试则结束，避免 in_progress 引用阻塞后续 test_13 删除题库
+    if r.status_code == 200:
+        client.post(f"/api/exam/{r.json()['exam_id']}/finish", json={}, headers=auth_headers)
+
+
 # ── Test: 提前交卷 ──
 
 
