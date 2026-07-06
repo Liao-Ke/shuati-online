@@ -911,6 +911,8 @@ async function startReview() {
   if (selectedBanks.length === 0) { alert('请至少选择一个题库'); return; }
   const types = [...document.querySelectorAll('.review-type-filter:checked')].map(cb => cb.value);
   const chapters = [...document.querySelectorAll('.review-chapter-filter:checked')].map(cb => cb.value);
+  const chapterCheckboxes = document.querySelectorAll('.review-chapter-filter');
+  if (chapterCheckboxes.length > 0 && chapters.length === 0) { alert('请至少选择一个章节'); return; }
   const showReviewingOnly = document.getElementById('review-show-reviewing').checked;
   reviewFilter = { bank_ids: selectedBanks, types, chapters: chapters.length > 0 ? chapters : null, show_reviewing_only: showReviewingOnly };
   sessionStorage.setItem('reviewFilter', JSON.stringify(reviewFilter));
@@ -1146,6 +1148,8 @@ async function startExam() {
   const choiceTimeout = parseInt(document.getElementById('timeout-choice').value) || 30;
   const fillTimeout = parseInt(document.getElementById('timeout-fill').value) || 60;
   const chapters = [...document.querySelectorAll('.exam-chapter-filter:checked')].map(cb => cb.value);
+  const chapterCheckboxes = document.querySelectorAll('.exam-chapter-filter');
+  if (chapterCheckboxes.length > 0 && chapters.length === 0) { alert('请至少选择一个章节'); return; }
   try {
     const res = await api.startExam({ bank_ids: selectedBanks, mode, types, chapters: chapters.length > 0 ? chapters : null, question_count: questionCount, timer_mode: timerMode, choice_timeout: choiceTimeout, judge_fill_timeout: fillTimeout });
     examId = res.exam_id;
