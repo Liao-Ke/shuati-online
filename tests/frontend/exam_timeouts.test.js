@@ -20,7 +20,9 @@ function loadHelpers() {
     __exports: {},
   };
   vm.createContext(context);
-  vm.runInContext(`${source}\n__exports.saveExamTimeouts = saveExamTimeouts;\n__exports.getExamTimeoutSeconds = getExamTimeoutSeconds;`, context);
+  vm.runInContext(`${source}\n__exports.saveExamTimeouts = saveExamTimeouts;\n__exports.getExamTimeoutSeconds = getExamTimeoutSeconds;
+__exports.formatBankDisplayName = formatBankDisplayName;
+__exports.isWrongPracticeBankChecked = isWrongPracticeBankChecked;`, context);
   return { ...context.__exports, sessionStorage: context.sessionStorage };
 }
 
@@ -48,4 +50,17 @@ test('exam timeout helpers fall back to defaults when storage is missing or brok
   assert.equal(getExamTimeoutSeconds('choice'), 30);
   assert.equal(getExamTimeoutSeconds('multiple'), 45);
   assert.equal(getExamTimeoutSeconds('judge'), 60);
+});
+
+
+test('wrong answer bank helpers distinguish same-title banks by id', () => {
+  const { formatBankDisplayName, isWrongPracticeBankChecked } = loadHelpers();
+  const wrongBankIds = new Set([101]);
+  const first = { id: 101, title: '同名题库' };
+  const second = { id: 202, title: '同名题库' };
+
+  assert.equal(formatBankDisplayName(first.title, first.id), '同名题库 #101');
+  assert.equal(formatBankDisplayName(second.title, second.id), '同名题库 #202');
+  assert.equal(isWrongPracticeBankChecked(first, wrongBankIds), true);
+  assert.equal(isWrongPracticeBankChecked(second, wrongBankIds), false);
 });

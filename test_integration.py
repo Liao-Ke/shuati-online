@@ -322,6 +322,56 @@ def test_07_wrong_answers(client, auth_headers):
     r = client.get("/api/wrong-answers", headers=auth_headers)
     assert r.status_code == 200
     assert len(r.json()) == 2
+    # #54: 错题响应应返回 bank_id，前端据此区分同名题库
+    for item in r.json():
+        assert "bank_id" in item, "错题响应缺少 bank_id 字段"
+
+
+def test_07f_wrong_answers_same_title_distinct_bank_id(client, auth_headers):
+    """同名题库应通过 bank_id 区分，bank_title 相同但 bank_id 不同 (#54)"""
+    # 再导入一个同名题库（与 state.bank_id 的题库同名 "测试题库"），只含 1 道选择题
+    same_title_data = {
+        "title": "测试题库",
+        "description": "同名题库二",
+        "questions": [
+            {"type": "choice", "chapter": "基础", "content": "2+2=?", "options": ["3", "4", "5", "6"], "answer": "B"},
+        ],
+    }
+    r = client.post("/api/question-banks/import", json=same_title_data, headers=auth_headers)
+    assert r.status_code in (200, 201), f"导入同名题库失败: {r.text}"
+    second_bank_id = r.json()["id"]
+    assert second_bank_id != state.bank_id, "同名题库应有不同 ID"
+
+    # 用第二个题库单独开考并答错，产生错题
+    r = client.post("/api/exam/start", json={
+        "bank_ids": [second_bank_id],
+        "mode": "sequential",
+        "question_count": 1,
+        "timer_mode": "per_question",
+    }, headers=auth_headers)
+    assert r.status_code == 200, f"开始考试失败: {r.text}"
+    exam_id = r.json()["exam_id"]
+    r = client.get(f"/api/exam/{exam_id}/current", headers=auth_headers)
+    q = r.json()["question"]
+    r = client.post(f"/api/exam/{exam_id}/answer", json={
+        "exam_id": exam_id, "question_id": q["id"], "user_answer": "A", "time_spent_seconds": 3,
+    }, headers=auth_headers)
+    assert r.status_code == 200
+    client.post(f"/api/exam/{exam_id}/finish", json={}, headers=auth_headers)
+
+    # 错题本应能通过 bank_id 区分两个同名题库
+    r = client.get("/api/wrong-answers", headers=auth_headers)
+    wrongs = r.json()
+    same_title = [w for w in wrongs if w.get("bank_title") == "测试题库"]
+    assert len(same_title) >= 1
+    bank_ids = {w["bank_id"] for w in same_title}
+    assert state.bank_id in bank_ids, "原同名题库的错题应保留来源 bank_id"
+    assert second_bank_id in bank_ids, "第二个同名题库的错题应能通过 bank_id 识别来源"
+    assert len(bank_ids) >= 2, "同名题库不应再被 bank_title 混成一个来源"
+    assert all(w["bank_id"] for w in same_title), "bank_id 不应为空"
+
+    # 清理第二个题库，避免影响后续 test_14_verify_delete 的 0 题库断言
+    client.delete(f"/api/question-banks/{second_bank_id}", headers=auth_headers)
 
 
 # ── Test: 错题练习 ──
