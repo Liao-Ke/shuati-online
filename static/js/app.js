@@ -36,6 +36,11 @@ const router = new Router();
 const $ = (sel) => document.querySelector(sel);
 const $$ = (sel) => document.querySelectorAll(sel);
 
+window.addEventListener('auth-expired', () => {
+  state.user = null;
+  router.navigate('/login');
+});
+
 let examId = null;
 let examTotalCount = 0;
 let selectedAnswer = null;
