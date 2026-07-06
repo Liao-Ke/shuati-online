@@ -53,7 +53,7 @@ JWT_AUDIENCE = "shuati-api"
 JWT_LEEWAY = 60
 
 pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
-security = HTTPBearer()
+security = HTTPBearer(auto_error=False)
 
 
 def hash_password(password: str) -> str:
@@ -78,9 +78,11 @@ def create_access_token(data: dict) -> str:
 
 
 def get_current_user(
-    credentials: HTTPAuthorizationCredentials = Depends(security),
+    credentials: HTTPAuthorizationCredentials | None = Depends(security),
     db: Session = Depends(get_db),
 ) -> User:
+    if credentials is None:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="未认证")
     token = credentials.credentials
     try:
         payload = jwt.decode(

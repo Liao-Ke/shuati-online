@@ -1,5 +1,5 @@
 
-from pydantic import BaseModel, field_validator
+from pydantic import BaseModel, Field, field_validator
 
 
 class UserRegister(BaseModel):
@@ -75,7 +75,7 @@ class ExamStart(BaseModel):
     bank_ids: list[int]
     mode: str
     types: list[str] | None = None
-    question_count: int | None = None
+    question_count: int | None = Field(default=None, ge=1)
     timer_mode: str = "per_question"
     chapters: list[str] | None = None
     choice_timeout: int = 30
@@ -111,7 +111,7 @@ class AnswerSubmit(BaseModel):
     exam_id: int
     question_id: int
     user_answer: str | list[str] | None = None
-    time_spent_seconds: int
+    time_spent_seconds: int = Field(ge=0)
 
 
 class AnswerResult(BaseModel):
@@ -231,3 +231,10 @@ class BankUpdate(BaseModel):
 class WrongAnswerStartRequest(BaseModel):
     bank_ids: list[int] | None = None
     timer_mode: str = "per_question"
+
+    @field_validator("timer_mode")
+    @classmethod
+    def _validate_timer_mode(cls, v: str) -> str:
+        if v not in ("per_question", "elapsed"):
+            raise ValueError("timer_mode 必须为 per_question 或 elapsed")
+        return v

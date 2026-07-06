@@ -13,11 +13,11 @@ BANK_DATA = {
     "title": "测试题库",
     "description": "这是一个测试",
     "questions": [
-        {"type": "choice", "chapter": "基础", "content": "1+1=?", "options": ["A.1", "B.2", "C.3", "D.4"], "answer": "B"},
+        {"type": "choice", "chapter": "基础", "content": "1+1=?", "options": ["1", "2", "3", "4"], "answer": "B"},
         {"type": "fill", "chapter": "基础", "content": "中国的首都是____", "answer": "北京"},
         {"type": "fill", "chapter": "进阶", "content": "四大发明是____、____、____和____", "answer": ["造纸术", "印刷术", "火药", "指南针"]},
         {"type": "judge", "chapter": "基础", "content": "地球是圆的", "answer": "对"},
-        {"type": "multiple", "chapter": "基础", "content": "以下哪些是数字？", "options": ["A. 一", "B. 二", "C. 三", "D. 四"], "answer": ["A", "B", "C", "D"]},
+        {"type": "multiple", "chapter": "基础", "content": "以下哪些是数字？", "options": ["一", "二", "三", "四"], "answer": ["A", "B", "C", "D"]},
     ],
 }
 
@@ -114,6 +114,17 @@ def test_02_import_bank(client, auth_headers):
     assert r.json()["question_count"] == 5
 
 
+def test_02b_import_bank_options_no_prefix(client, auth_headers):
+    """验证导入后 choice/multiple 题的 options 不包含字母前缀（回归 #51）"""
+    r = client.get(f"/api/question-banks/{state.bank_id}", headers=auth_headers)
+    assert r.status_code == 200
+    for q in r.json()["questions"]:
+        if q["type"] in ("choice", "multiple"):
+            for opt in q.get("options") or []:
+                import re
+                assert not re.match(r"^[A-Z]\.", opt), f"选项 '{opt}' 包含多余字母前缀"
+
+
 def test_03_list_banks(client, auth_headers):
     r = client.get("/api/question-banks", headers=auth_headers)
     assert r.status_code == 200
@@ -123,10 +134,10 @@ def test_03_list_banks(client, auth_headers):
 def test_03b_import_multiple(client, auth_headers):
     data = [
         {"title": "批量题库A", "questions": [
-            {"type": "choice", "content": "2+2=?", "options": ["A.3", "B.4"], "answer": "B"},
+            {"type": "choice", "content": "2+2=?", "options": ["3", "4"], "answer": "B"},
         ]},
         {"title": "", "questions": [
-            {"type": "choice", "content": "x", "options": ["A.1"], "answer": "A"},
+            {"type": "choice", "content": "x", "options": ["1"], "answer": "A"},
         ]},
     ]
     r = client.post("/api/question-banks/import-multiple", json=data, headers=auth_headers)
@@ -145,13 +156,13 @@ def test_03b_import_multiple(client, auth_headers):
 def test_03c_import_multiple_db_failure(client, auth_headers):
     data = [
         {"title": "DB隔离A", "questions": [
-            {"type": "choice", "content": "1+1=?", "options": ["A.1", "B.2"], "answer": "B"},
+            {"type": "choice", "content": "1+1=?", "options": ["1", "2"], "answer": "B"},
         ]},
         {"title": "DB隔离B-失败", "questions": [
-            {"type": "choice", "content": "x", "options": ["A.1", "B.2"], "answer": "A"},
+            {"type": "choice", "content": "x", "options": ["1", "2"], "answer": "A"},
         ]},
         {"title": "DB隔离C", "questions": [
-            {"type": "choice", "content": "3+3=?", "options": ["A.5", "B.6"], "answer": "B"},
+            {"type": "choice", "content": "3+3=?", "options": ["5", "6"], "answer": "B"},
         ]},
     ]
 
@@ -196,6 +207,17 @@ def test_04_start_exam(client, auth_headers):
     assert r.status_code == 200
     state.exam_id = r.json()["exam_id"]
     assert r.json()["total_count"] == 5
+
+
+def test_04a_start_exam_rejects_nonpositive_count(client, auth_headers):
+    """question_count 为 0/负数时应在请求边界被拒为 422（issue #45）。
+    None 表示用全部题目，其行为由 test_04（省略该字段）覆盖。"""
+    for bad in (-1, 0):
+        r = client.post("/api/exam/start", json={
+            "bank_ids": [state.bank_id], "mode": "random",
+            "question_count": bad,
+        }, headers=auth_headers)
+        assert r.status_code == 422, f"question_count={bad} 应被拒绝，实际 {r.status_code}"
 
 
 def test_05_answer_all(client, auth_headers):
@@ -366,6 +388,22 @@ def test_07e_wrong_practice_no_wrong_questions(client, auth_headers):
     headers = {"Authorization": f"Bearer {token}"}
     r = client.post("/api/wrong-answers/start", json={}, headers=headers)
     assert r.status_code == 400, f"无错题应返回 400: {r.text}"
+
+
+def test_07g_wrong_practice_rejects_invalid_timer_mode(client, auth_headers):
+    """非法 timer_mode 应在请求解析阶段被拒为 422，与 /api/exam/start 行为一致 (#48)"""
+    r = client.post("/api/wrong-answers/start", json={
+        "timer_mode": "bad_mode",
+    }, headers=auth_headers)
+    assert r.status_code == 422, f"非法 timer_mode 应返回 422: {r.text}"
+    # 合法值不应被 422 拦截（无错题时为 400 业务错误，有错题时为 200，均非 422）
+    r = client.post("/api/wrong-answers/start", json={
+        "timer_mode": "elapsed",
+    }, headers=auth_headers)
+    assert r.status_code != 422, f"elapsed 为合法值不应被 422 拦截: {r.text}"
+    # 清理：若成功创建考试则结束，避免 in_progress 引用阻塞后续 test_13 删除题库
+    if r.status_code == 200:
+        client.post(f"/api/exam/{r.json()['exam_id']}/finish", json={}, headers=auth_headers)
 
 
 # ── Test: 提前交卷 ──
@@ -625,6 +663,28 @@ def test_26_filter_reviewing_only(client, auth_headers):
     assert len(known_ids) == 0
 
 
+def test_26a_filter_reviewing_only_excludes_unmarked(client, auth_headers):
+    # 第一道题在 test_26 已标记为 known；取第二道题标记为 reviewing
+    r = client.post("/api/review/questions", json={
+        "bank_ids": [state.bank_id],
+    }, headers=auth_headers)
+    questions = r.json()
+    reviewing_qid = questions[1]["id"]
+    r = client.post("/api/review/mark", json={
+        "question_id": reviewing_qid, "status": "reviewing",
+    }, headers=auth_headers)
+    assert r.status_code == 200
+
+    r = client.post("/api/review/questions", json={
+        "bank_ids": [state.bank_id],
+        "show_reviewing_only": True,
+    }, headers=auth_headers)
+    filtered = r.json()
+    # 只看需复习：仅返回 reviewing 题，known 与未标记(None)题都不应出现
+    assert [q["id"] for q in filtered] == [reviewing_qid]
+    assert all(q["review_status"] == "reviewing" for q in filtered)
+
+
 def test_27_review_type_filter_choice(client, auth_headers):
     r = client.post("/api/review/questions", json={
         "bank_ids": [state.bank_id],
@@ -651,7 +711,7 @@ def test_28_review_type_filter_multiple(client, auth_headers):
 def test_29_create_question_choice(client, auth_headers):
     r = client.post(f"/api/question-banks/{state.bank_id}/questions", json={
         "type": "choice", "chapter": "新章节", "content": "1+2=?",
-        "options": ["A.1", "B.2", "C.3", "D.4"], "answer": "C",
+        "options": ["1", "2", "3", "4"], "answer": "C",
     }, headers=auth_headers)
     assert r.status_code == 201
     data = r.json()
@@ -688,7 +748,7 @@ def test_32_create_question_judge(client, auth_headers):
 def test_33_create_question_multiple(client, auth_headers):
     r = client.post(f"/api/question-banks/{state.bank_id}/questions", json={
         "type": "multiple", "content": "以下哪些是数字？",
-        "options": ["A.一", "B.二", "C.三", "D.四"], "answer": ["A", "B"],
+        "options": ["一", "二", "三", "四"], "answer": ["A", "B"],
     }, headers=auth_headers)
     assert r.status_code == 201
     state._q_multi_id = r.json()["id"]
@@ -696,7 +756,7 @@ def test_33_create_question_multiple(client, auth_headers):
 
 def test_34_create_question_validation_error(client, auth_headers):
     r = client.post(f"/api/question-banks/{state.bank_id}/questions", json={
-        "type": "choice", "content": "test", "options": ["A.1"], "answer": "A",
+        "type": "choice", "content": "test", "options": ["1"], "answer": "A",
     }, headers=auth_headers)
     assert r.status_code == 400
 
@@ -704,7 +764,7 @@ def test_34_create_question_validation_error(client, auth_headers):
 def test_35_create_question_nonexistent_bank(client, auth_headers):
     r = client.post("/api/question-banks/99999/questions", json={
         "type": "choice", "content": "test",
-        "options": ["A.1", "B.2"], "answer": "A",
+        "options": ["1", "2"], "answer": "A",
     }, headers=auth_headers)
     assert r.status_code == 404
 
@@ -865,6 +925,18 @@ def test_44_cleanup_restore_bank(client, auth_headers):
 # ── Test: JWT hardening ──
 
 
+def test_auth_missing_authorization_returns_401(client):
+    r = client.get("/api/question-banks")
+    assert r.status_code == 401
+    assert r.json()["detail"] == "未认证"
+
+
+def test_auth_wrong_scheme_returns_401(client):
+    r = client.get("/api/question-banks", headers={"Authorization": "Basic abc"})
+    assert r.status_code == 401
+    assert r.json()["detail"] == "未认证"
+
+
 def test_45_wrong_issuer_rejected(client):
     now = datetime.now(UTC).replace(tzinfo=None)
     token = jwt.encode({
@@ -912,3 +984,354 @@ def test_49_token_beyond_leeway_rejected(client):
     }, SECRET_KEY, algorithm=ALGORITHM)
     r = client.get("/api/question-banks", headers={"Authorization": f"Bearer {token}"})
     assert r.status_code == 401, "token expired beyond leeway should be rejected"
+
+
+def test_50_submit_answer_path_body_mismatch(client, auth_headers):
+    """路径 exam_id 与请求体 exam_id 不一致时返回 400，答案不写入（issue #46）"""
+    bank = {
+        "title": "issue46题库",
+        "questions": [
+            {"type": "choice", "chapter": "基础", "content": "1+1=?", "options": ["A.1", "B.2"], "answer": "B"},
+        ],
+    }
+    r = client.post("/api/question-banks/import", json=bank, headers=auth_headers)
+    assert r.status_code == 201, f"导入失败: {r.text}"
+    bank_id = r.json()["id"]
+
+    start_body = {
+        "bank_ids": [bank_id], "mode": "sequential",
+        "types": ["choice"], "choice_timeout": 30, "judge_fill_timeout": 60,
+    }
+    r = client.post("/api/exam/start", json=start_body, headers=auth_headers)
+    assert r.status_code == 200
+    exam_a = r.json()["exam_id"]
+    r = client.post("/api/exam/start", json=start_body, headers=auth_headers)
+    assert r.status_code == 200
+    exam_b = r.json()["exam_id"]
+
+    r = client.get(f"/api/exam/{exam_a}/current", headers=auth_headers)
+    qid = r.json()["question"]["id"]
+
+    # 路径 examB + 请求体 examA → 400，答案不写入任何考试
+    r = client.post(f"/api/exam/{exam_b}/answer", json={
+        "exam_id": exam_a, "question_id": qid,
+        "user_answer": "B", "time_spent_seconds": 3,
+    }, headers=auth_headers)
+    assert r.status_code == 400, f"路径/请求体不一致应返回 400: {r.text}"
+    assert "不一致" in r.json()["detail"]
+
+    # 两场考试进度均为空，未被写入
+    r = client.get(f"/api/exam/{exam_a}/progress", headers=auth_headers)
+    assert r.json()["answers"] == []
+    r = client.get(f"/api/exam/{exam_b}/progress", headers=auth_headers)
+    assert r.json()["answers"] == []
+
+    # 路径与请求体一致 → 200（向后兼容，正常受理）
+    r = client.post(f"/api/exam/{exam_a}/answer", json={
+        "exam_id": exam_a, "question_id": qid,
+        "user_answer": "B", "time_spent_seconds": 3,
+    }, headers=auth_headers)
+    assert r.status_code == 200, f"一致时应正常受理: {r.text}"
+
+
+# ── Test: 答案必须属于现有选项（issue #42）──
+
+
+def test_51_import_rejects_choice_answer_not_in_options(client, auth_headers):
+    """选择题答案不属于现有选项标签时，导入返回 400（issue #42）"""
+    data = {
+        "title": "必错题测试",
+        "questions": [
+            {"type": "choice", "content": "1+1=?", "options": ["1", "4"], "answer": "C"},
+        ],
+    }
+    r = client.post("/api/question-banks/import", json=data, headers=auth_headers)
+    assert r.status_code == 400
+    assert "不属于现有选项" in r.text
+
+
+def test_52_import_rejects_multiple_answer_not_in_options(client, auth_headers):
+    """多选题答案含超出选项范围的标签时，导入返回 400（issue #42）"""
+    data = {
+        "title": "多选必错题",
+        "questions": [
+            {"type": "multiple", "content": "哪些是偶数？", "options": ["2", "4"], "answer": ["A", "C"]},
+        ],
+    }
+    r = client.post("/api/question-banks/import", json=data, headers=auth_headers)
+    assert r.status_code == 400
+    assert "不属于现有选项" in r.text
+
+
+def test_53_import_rejects_multiple_duplicate_answer(client, auth_headers):
+    """多选题答案含重复标签时，导入返回 400（issue #42）"""
+    data = {
+        "title": "重复答案",
+        "questions": [
+            {"type": "multiple", "content": "哪些是偶数？", "options": ["2", "4", "6"], "answer": ["A", "A"]},
+        ],
+    }
+    r = client.post("/api/question-banks/import", json=data, headers=auth_headers)
+    assert r.status_code == 400
+    assert "重复" in r.text
+
+
+def test_54_create_question_rejects_choice_answer_not_in_options(client, auth_headers):
+    """新建选择题答案不属于现有选项时返回 400（issue #42）"""
+    r = client.post(f"/api/question-banks/{state.bank_id}/questions", json={
+        "type": "choice", "content": "test", "options": ["1", "2"], "answer": "D",
+    }, headers=auth_headers)
+    assert r.status_code == 400
+    assert "不属于现有选项" in r.text
+
+
+def test_55_create_question_rejects_multiple_answer_not_in_options(client, auth_headers):
+    """新建多选题答案含超出选项范围的标签时返回 400（issue #42）"""
+    r = client.post(f"/api/question-banks/{state.bank_id}/questions", json={
+        "type": "multiple", "content": "test", "options": ["1", "2"], "answer": ["A", "C"],
+    }, headers=auth_headers)
+    assert r.status_code == 400
+    assert "不属于现有选项" in r.text
+
+
+def test_56_update_question_rejects_choice_answer_not_in_options(client, auth_headers):
+    """编辑选择题答案不属于现有选项时返回 400（issue #42）"""
+    r = client.post(f"/api/question-banks/{state.bank_id}/questions", json={
+        "type": "choice", "content": "合法题", "options": ["1", "2"], "answer": "A",
+    }, headers=auth_headers)
+    assert r.status_code == 201
+    qid = r.json()["id"]
+    r = client.put(f"/api/questions/{qid}", json={"answer": "Z"}, headers=auth_headers)
+    assert r.status_code == 400
+    assert "不属于现有选项" in r.text
+    client.delete(f"/api/questions/{qid}", headers=auth_headers)
+
+
+def test_57_import_multiple_rejects_invalid_answer(client, auth_headers):
+    """批量导入时某题库含非法答案，该条失败但不影响其他条（issue #42）"""
+    data = [
+        {"title": "合法批量42", "questions": [
+            {"type": "choice", "content": "1+1=?", "options": ["1", "2"], "answer": "B"},
+        ]},
+        {"title": "非法批量42", "questions": [
+            {"type": "choice", "content": "x", "options": ["1", "2"], "answer": "C"},
+        ]},
+    ]
+    r = client.post("/api/question-banks/import-multiple", json=data, headers=auth_headers)
+    assert r.status_code == 200
+    results = r.json()["results"]
+    assert results[0]["success"] is True
+    assert results[1]["success"] is False
+    assert "不属于现有选项" in results[1]["error"]
+    r = client.get("/api/question-banks", headers=auth_headers)
+    for b in r.json():
+        if b["title"] == "合法批量42":
+            client.delete(f"/api/question-banks/{b['id']}", headers=auth_headers)
+            break
+
+
+# ── Test: 选项空白校验（issue #49）──
+
+
+def test_58_import_bank_rejects_blank_choice_option(client, auth_headers):
+    data = {
+        "title": "空白选项题库",
+        "questions": [
+            {"type": "choice", "content": "空白选项", "options": ["有效", "   "], "answer": "A"},
+        ],
+    }
+    r = client.post("/api/question-banks/import", json=data, headers=auth_headers)
+    assert r.status_code == 400
+    assert "空白" in r.text
+
+
+def test_59_import_bank_rejects_blank_multiple_option(client, auth_headers):
+    data = {
+        "title": "空白多选选项",
+        "questions": [
+            {"type": "multiple", "content": "多选空白", "options": ["x", "y", ""], "answer": ["A", "B"]},
+        ],
+    }
+    r = client.post("/api/question-banks/import", json=data, headers=auth_headers)
+    assert r.status_code == 400
+    assert "空白" in r.text
+
+
+def test_60_import_multiple_rejects_blank_option(client, auth_headers):
+    data = [
+        {"title": "批量空白选项-合法", "questions": [
+            {"type": "choice", "content": "1+1=?", "options": ["1", "2"], "answer": "B"},
+        ]},
+        {"title": "批量空白选项-非法", "questions": [
+            {"type": "choice", "content": "空白选项", "options": ["有效", "  "], "answer": "A"},
+        ]},
+    ]
+    r = client.post("/api/question-banks/import-multiple", json=data, headers=auth_headers)
+    assert r.status_code == 200
+    results = r.json()["results"]
+    assert results[0]["success"] is True
+    assert results[1]["success"] is False
+    assert "空白" in results[1]["error"]
+    r = client.get("/api/question-banks", headers=auth_headers)
+    for b in r.json():
+        if b["title"] == "批量空白选项-合法":
+            client.delete(f"/api/question-banks/{b['id']}", headers=auth_headers)
+            break
+
+
+def test_61_create_question_rejects_blank_option(client, auth_headers):
+    r = client.post(f"/api/question-banks/{state.bank_id}/questions", json={
+        "type": "choice", "content": "新建空白选项",
+        "options": ["1", "  "], "answer": "A",
+    }, headers=auth_headers)
+    assert r.status_code == 400
+    assert "空白" in r.text
+
+
+def test_62_update_question_rejects_blank_option(client, auth_headers):
+    r = client.post(f"/api/question-banks/{state.bank_id}/questions", json={
+        "type": "choice", "content": "待更新空白选项",
+        "options": ["1", "2"], "answer": "A",
+    }, headers=auth_headers)
+    assert r.status_code == 201
+    qid = r.json()["id"]
+    r = client.put(f"/api/questions/{qid}", json={
+        "options": ["1", ""], "answer": "A",
+    }, headers=auth_headers)
+    assert r.status_code == 400
+    assert "空白" in r.text
+
+
+# ── Test: submit_answer 拒绝负耗时（issue #41）──
+
+
+def test_63_submit_answer_rejects_negative_duration(client, auth_headers):
+    """time_spent_seconds 为负数时应在请求解析阶段被拒为 422，不污染考试统计（issue #41）"""
+    r = client.post("/api/exam/start", json={
+        "bank_ids": [state.bank_id], "mode": "sequential",
+        "types": ["choice", "fill", "judge", "multiple"],
+        "choice_timeout": 30, "judge_fill_timeout": 60,
+    }, headers=auth_headers)
+    assert r.status_code == 200
+    exam_id = r.json()["exam_id"]
+
+    r = client.get(f"/api/exam/{exam_id}/current", headers=auth_headers)
+    qid = r.json()["question"]["id"]
+
+    # 负耗时应在 schema 边界被拒，不进入路由逻辑、不写库
+    r = client.post(f"/api/exam/{exam_id}/answer", json={
+        "exam_id": exam_id, "question_id": qid,
+        "user_answer": "B", "time_spent_seconds": -120,
+    }, headers=auth_headers)
+    assert r.status_code == 422, f"负耗时应返回 422，实际 {r.status_code}: {r.text}"
+
+    # 零耗时合法，正常入库
+    r = client.post(f"/api/exam/{exam_id}/answer", json={
+        "exam_id": exam_id, "question_id": qid,
+        "user_answer": "B", "time_spent_seconds": 0,
+    }, headers=auth_headers)
+    assert r.status_code == 200
+
+    # 确认考试总耗时非负
+    r = client.post(f"/api/exam/{exam_id}/finish", json={}, headers=auth_headers)
+    assert r.status_code == 200
+    r = client.get(f"/api/exam/{exam_id}/result", headers=auth_headers)
+    assert r.json()["duration_seconds"] >= 0
+
+
+# ── Test: submit_answer 校验提交答案选项范围（issue #55）──
+
+
+def _ensure_test_bank(client, auth_headers):
+    if state.bank_id is not None:
+        return
+    data = {**BANK_DATA, "title": f"提交答案校验-{uuid.uuid4().hex[:8]}"}
+    r = client.post("/api/question-banks/import", json=data, headers=auth_headers)
+    assert r.status_code == 201, f"导入失败: {r.text}"
+    state.bank_id = r.json()["id"]
+
+
+def _start_exam_question(client, auth_headers, question_type):
+    _ensure_test_bank(client, auth_headers)
+    r = client.post("/api/exam/start", json={
+        "bank_ids": [state.bank_id], "mode": "sequential",
+        "types": [question_type],
+        "choice_timeout": 30, "judge_fill_timeout": 60,
+    }, headers=auth_headers)
+    assert r.status_code == 200
+    exam_id = r.json()["exam_id"]
+    r = client.get(f"/api/exam/{exam_id}/current", headers=auth_headers)
+    assert r.status_code == 200
+    return exam_id, r.json()["question"]["id"]
+
+
+def _assert_exam_has_no_answers(client, auth_headers, exam_id):
+    r = client.get(f"/api/exam/{exam_id}/progress", headers=auth_headers)
+    assert r.status_code == 200
+    assert r.json()["answers"] == []
+
+
+def test_64_submit_answer_rejects_invalid_choice_option(client, auth_headers):
+    """选择题提交不存在的选项标签时返回 400，且不写入答题记录（issue #55）"""
+    exam_id, qid = _start_exam_question(client, auth_headers, "choice")
+    r = client.post(f"/api/exam/{exam_id}/answer", json={
+        "exam_id": exam_id, "question_id": qid,
+        "user_answer": "Z", "time_spent_seconds": 3,
+    }, headers=auth_headers)
+    assert r.status_code == 400
+    assert "无效选项" in r.text
+    _assert_exam_has_no_answers(client, auth_headers, exam_id)
+
+
+def test_65_submit_answer_rejects_invalid_choice_answer_type(client, auth_headers):
+    """选择题提交列表答案时返回明确错误，避免落到选项不存在分支（issue #55）"""
+    exam_id, qid = _start_exam_question(client, auth_headers, "choice")
+    r = client.post(f"/api/exam/{exam_id}/answer", json={
+        "exam_id": exam_id, "question_id": qid,
+        "user_answer": ["A"], "time_spent_seconds": 3,
+    }, headers=auth_headers)
+    assert r.status_code == 400
+    assert "字符串" in r.text
+    _assert_exam_has_no_answers(client, auth_headers, exam_id)
+
+
+def test_66_submit_answer_rejects_invalid_judge_answer(client, auth_headers):
+    """判断题只接受“对”或“错”（issue #55）"""
+    exam_id, qid = _start_exam_question(client, auth_headers, "judge")
+    r = client.post(f"/api/exam/{exam_id}/answer", json={
+        "exam_id": exam_id, "question_id": qid,
+        "user_answer": "A", "time_spent_seconds": 3,
+    }, headers=auth_headers)
+    assert r.status_code == 400
+    assert "判断题答案" in r.text
+    _assert_exam_has_no_answers(client, auth_headers, exam_id)
+
+
+def test_67_submit_answer_rejects_invalid_multiple_answer(client, auth_headers):
+    """多选题拒绝重复答案和不存在的选项标签（issue #55）"""
+    exam_id, qid = _start_exam_question(client, auth_headers, "multiple")
+    r = client.post(f"/api/exam/{exam_id}/answer", json={
+        "exam_id": exam_id, "question_id": qid,
+        "user_answer": ["A", "A"], "time_spent_seconds": 3,
+    }, headers=auth_headers)
+    assert r.status_code == 400
+    assert "重复" in r.text
+    _assert_exam_has_no_answers(client, auth_headers, exam_id)
+
+    r = client.post(f"/api/exam/{exam_id}/answer", json={
+        "exam_id": exam_id, "question_id": qid,
+        "user_answer": ["A", "Z"], "time_spent_seconds": 3,
+    }, headers=auth_headers)
+    assert r.status_code == 400
+    assert "无效选项" in r.text
+    _assert_exam_has_no_answers(client, auth_headers, exam_id)
+
+
+def test_68_submit_answer_allows_null_answer(client, auth_headers):
+    """空答案仍允许提交，用于保留跳过/未作答的兼容行为（issue #55）"""
+    exam_id, qid = _start_exam_question(client, auth_headers, "choice")
+    r = client.post(f"/api/exam/{exam_id}/answer", json={
+        "exam_id": exam_id, "question_id": qid,
+        "user_answer": None, "time_spent_seconds": 3,
+    }, headers=auth_headers)
+    assert r.status_code == 200
