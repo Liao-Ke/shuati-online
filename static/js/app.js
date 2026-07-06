@@ -41,6 +41,23 @@ window.addEventListener('auth-expired', () => {
   router.navigate('/login');
 });
 
+function saveExamTimeouts(choice, multi, fill) {
+  sessionStorage.setItem('examTimeouts', JSON.stringify({ choice, multi, fill }));
+}
+
+function getExamTimeoutSeconds(type) {
+  let timeouts = {};
+  try {
+    timeouts = JSON.parse(sessionStorage.getItem('examTimeouts') || '{}');
+  } catch {
+    // ponytail: sessionStorage 可能被手动篡改；损坏时回退默认时长即可，未来若 sessionStorage JSON 变多再抽通用 safeParse。
+    timeouts = {};
+  }
+  if (type === 'choice') return timeouts.choice || 30;
+  if (type === 'multiple') return timeouts.multi || 45;
+  return timeouts.fill || 60;
+}
+
 let examId = null;
 let examTotalCount = 0;
 let selectedAnswer = null;
@@ -1168,7 +1185,7 @@ async function startExam() {
     sessionStorage.setItem('examTimerMode', examTimerMode);
     sessionStorage.setItem('examStartedAt', examStartedAt);
     sessionStorage.setItem('examElapsedOffset', '0');
-    sessionStorage.setItem('examTimeouts', JSON.stringify({ choice: choiceTimeout, multi: multiTimeout, fill: fillTimeout }));
+    saveExamTimeouts(choiceTimeout, multiTimeout, fillTimeout);
     router.navigate('/exam');
   } catch (err) {
     alert(err.message);
@@ -1282,15 +1299,8 @@ async function loadQuestionByIndex(index) {
       return;
     }
 
-    const isChoice = q.type === 'choice';
-    const isMultiple = q.type === 'multiple';
     if (examTimerMode !== 'elapsed') {
-      const timeouts = JSON.parse(sessionStorage.getItem('examTimeouts') || '{}');
-      examTimeoutSeconds = isChoice
-        ? (timeouts.choice || 30)
-        : (isMultiple
-          ? (timeouts.multi || 45)
-          : (timeouts.fill || 60));
+      examTimeoutSeconds = getExamTimeoutSeconds(q.type);
       state.questionStartTime = Date.now();
     }
 

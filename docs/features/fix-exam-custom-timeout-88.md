@@ -34,10 +34,11 @@
 ## 验证方式
 
 - `node --check static/js/app.js` 语法通过
+- `node --test tests/frontend/*.test.js` 覆盖自定义倒计时持久化、读取默认值和损坏 JSON 回退
 - `ruff check .` 0 错误
 - `pytest test_integration.py -v` 97 项全部通过
 
 ## 已知限制
 
-- 纯前端 sessionStorage 修复，无法通过 TestClient 集成测试覆盖；以 `node --check` 语法校验作为最低自动化验证
+- 纯前端 sessionStorage 修复，无法通过 TestClient 集成测试覆盖；本次补充 Node 内置测试覆盖倒计时持久化 helper
 - 后端 `ExamStart` 仍接收 `choice_timeout`/`judge_fill_timeout` 但不持久化，本次不动后端，时长完全由前端 sessionStorage 维护
