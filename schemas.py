@@ -1,5 +1,5 @@
 
-from pydantic import BaseModel, field_validator
+from pydantic import BaseModel, Field, field_validator
 
 
 class UserRegister(BaseModel):
@@ -111,7 +111,7 @@ class AnswerSubmit(BaseModel):
     exam_id: int
     question_id: int
     user_answer: str | list[str] | None = None
-    time_spent_seconds: int
+    time_spent_seconds: int = Field(ge=0)
 
 
 class AnswerResult(BaseModel):
