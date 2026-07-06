@@ -213,6 +213,35 @@ def submit_answer(
 
     correct_answer = parse_answer(question.answer, question.type)
 
+    options = parse_json_field(question.options) if question.options else None
+    valid_labels = (
+        [chr(65 + i) for i in range(len(options))]
+        if isinstance(options, list) and question.type in ("choice", "multiple")
+        else None
+    )
+    if question.type == "choice" and data.user_answer is not None:
+        if not valid_labels:
+            raise HTTPException(status_code=400, detail="题目选项数据异常")
+        if not isinstance(data.user_answer, str):
+            raise HTTPException(status_code=400, detail="选择题答案必须为字符串")
+        if data.user_answer not in valid_labels:
+            raise HTTPException(status_code=400, detail=f"无效选项：{data.user_answer}")
+    elif question.type == "judge" and data.user_answer is not None:
+        if data.user_answer not in ("对", "错"):
+            raise HTTPException(status_code=400, detail=f"判断题答案必须为'对'或'错'，得到 '{data.user_answer}'")
+    elif question.type == "multiple" and data.user_answer is not None:
+        if not valid_labels:
+            raise HTTPException(status_code=400, detail="题目选项数据异常")
+        if not isinstance(data.user_answer, list):
+            raise HTTPException(status_code=400, detail="多选题答案必须为列表")
+        if len(data.user_answer) == 0:
+            raise HTTPException(status_code=400, detail="多选题答案不能为空")
+        if len(set(data.user_answer)) != len(data.user_answer):
+            raise HTTPException(status_code=400, detail="多选题答案不能包含重复选项")
+        invalid = [a for a in data.user_answer if a not in valid_labels]
+        if invalid:
+            raise HTTPException(status_code=400, detail=f"无效选项：{', '.join(invalid)}")
+
     if question.type == "choice" or question.type == "judge":
         is_correct = data.user_answer == correct_answer
     elif question.type == "fill":
