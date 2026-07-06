@@ -96,6 +96,7 @@ router.add('/login', async () => {
     btn.disabled = true; btn.innerHTML = '登录中...';
     try {
       const res = await api.login(username, password);
+      resetSessionState();
       api.setToken(res.access_token);
       state.user = res.user;
       router.navigate('/dashboard');
@@ -151,6 +152,7 @@ router.add('/register', () => {
     btn.disabled = true; btn.innerHTML = '注册中...';
     try {
       const res = await api.register(username, password);
+      resetSessionState();
       api.setToken(res.access_token);
       state.user = res.user;
       router.navigate('/dashboard');
@@ -1081,7 +1083,31 @@ function escHtml(s) {
   return div.innerHTML;
 }
 
+function resetSessionState() {
+  if (examTimerInterval) { clearInterval(examTimerInterval); examTimerInterval = null; }
+  if (examElapsedInterval) { clearInterval(examElapsedInterval); examElapsedInterval = null; }
+  if (examScrollTimer) { clearTimeout(examScrollTimer); examScrollTimer = null; }
+  window.removeEventListener('scroll', trackPreviewScroll);
+  const sessionKeys = ['activeExamId', 'examCurrentIndex', 'examMode', 'examTimerMode', 'examStartedAt', 'examElapsedOffset', 'reviewFilter'];
+  sessionKeys.forEach(k => sessionStorage.removeItem(k));
+  examId = null;
+  examTotalCount = 0;
+  selectedAnswer = null;
+  selectedMultiAnswers = [];
+  examCurrentIndex = 0;
+  examProgress = null;
+  examPaused = false;
+  examPauseRemaining = 0;
+  examFullPreview = false;
+  examTimerMode = 'per_question';
+  examStartedAt = null;
+  examElapsedOffset = 0;
+  reviewFilter = null;
+  reviewQuestions = [];
+}
+
 function logout() {
+  resetSessionState();
   api.setToken(null);
   state.user = null;
   router.navigate('/login');
