@@ -1083,3 +1083,75 @@ def test_57_import_multiple_rejects_invalid_answer(client, auth_headers):
         if b["title"] == "合法批量42":
             client.delete(f"/api/question-banks/{b['id']}", headers=auth_headers)
             break
+
+
+# ── Test: 选项空白校验（issue #49）──
+
+
+def test_58_import_bank_rejects_blank_choice_option(client, auth_headers):
+    data = {
+        "title": "空白选项题库",
+        "questions": [
+            {"type": "choice", "content": "空白选项", "options": ["有效", "   "], "answer": "A"},
+        ],
+    }
+    r = client.post("/api/question-banks/import", json=data, headers=auth_headers)
+    assert r.status_code == 400
+    assert "空白" in r.text
+
+
+def test_59_import_bank_rejects_blank_multiple_option(client, auth_headers):
+    data = {
+        "title": "空白多选选项",
+        "questions": [
+            {"type": "multiple", "content": "多选空白", "options": ["x", "y", ""], "answer": ["A", "B"]},
+        ],
+    }
+    r = client.post("/api/question-banks/import", json=data, headers=auth_headers)
+    assert r.status_code == 400
+    assert "空白" in r.text
+
+
+def test_60_import_multiple_rejects_blank_option(client, auth_headers):
+    data = [
+        {"title": "批量空白选项-合法", "questions": [
+            {"type": "choice", "content": "1+1=?", "options": ["1", "2"], "answer": "B"},
+        ]},
+        {"title": "批量空白选项-非法", "questions": [
+            {"type": "choice", "content": "空白选项", "options": ["有效", "  "], "answer": "A"},
+        ]},
+    ]
+    r = client.post("/api/question-banks/import-multiple", json=data, headers=auth_headers)
+    assert r.status_code == 200
+    results = r.json()["results"]
+    assert results[0]["success"] is True
+    assert results[1]["success"] is False
+    assert "空白" in results[1]["error"]
+    r = client.get("/api/question-banks", headers=auth_headers)
+    for b in r.json():
+        if b["title"] == "批量空白选项-合法":
+            client.delete(f"/api/question-banks/{b['id']}", headers=auth_headers)
+            break
+
+
+def test_61_create_question_rejects_blank_option(client, auth_headers):
+    r = client.post(f"/api/question-banks/{state.bank_id}/questions", json={
+        "type": "choice", "content": "新建空白选项",
+        "options": ["1", "  "], "answer": "A",
+    }, headers=auth_headers)
+    assert r.status_code == 400
+    assert "空白" in r.text
+
+
+def test_62_update_question_rejects_blank_option(client, auth_headers):
+    r = client.post(f"/api/question-banks/{state.bank_id}/questions", json={
+        "type": "choice", "content": "待更新空白选项",
+        "options": ["1", "2"], "answer": "A",
+    }, headers=auth_headers)
+    assert r.status_code == 201
+    qid = r.json()["id"]
+    r = client.put(f"/api/questions/{qid}", json={
+        "options": ["1", ""], "answer": "A",
+    }, headers=auth_headers)
+    assert r.status_code == 400
+    assert "空白" in r.text
