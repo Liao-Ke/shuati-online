@@ -33,7 +33,7 @@ def get_review_questions(
 
     bank_ids = [b.id for b in banks]
     query = db.query(Question).filter(Question.bank_id.in_(bank_ids))
-    if data.types:
+    if data.types is not None:
         query = query.filter(Question.type.in_(data.types))
     if data.chapters:
         query = query.filter(Question.chapter.in_(data.chapters))

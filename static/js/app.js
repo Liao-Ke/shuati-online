@@ -910,6 +910,7 @@ async function startReview() {
   const selectedBanks = [...document.querySelectorAll('.review-bank-checkbox:checked')].map(cb => parseInt(cb.value));
   if (selectedBanks.length === 0) { alert('请至少选择一个题库'); return; }
   const types = [...document.querySelectorAll('.review-type-filter:checked')].map(cb => cb.value);
+  if (types.length === 0) { alert('请至少选择一种题型'); return; }
   const chapters = [...document.querySelectorAll('.review-chapter-filter:checked')].map(cb => cb.value);
   const showReviewingOnly = document.getElementById('review-show-reviewing').checked;
   reviewFilter = { bank_ids: selectedBanks, types, chapters: chapters.length > 0 ? chapters : null, show_reviewing_only: showReviewingOnly };
@@ -1140,6 +1141,7 @@ async function startExam() {
   if (selectedBanks.length === 0) { alert('请至少选择一个题库'); return; }
   const mode = document.querySelector('.mode-card.active')?.dataset.mode || 'random';
   const types = [...document.querySelectorAll('.type-filter:checked')].map(cb => cb.value);
+  if (types.length === 0) { alert('请至少选择一种题型'); return; }
   const allQuestions = document.getElementById('question-count-all').checked;
   const questionCount = allQuestions ? null : parseInt(document.getElementById('question-count-input').value) || null;
   const timerMode = document.querySelector('[data-timer].active')?.dataset.timer || 'per_question';
