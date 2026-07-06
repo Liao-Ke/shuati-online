@@ -255,7 +255,7 @@ router.add('/banks', async () => {
               <p class="card-text text-muted">${b.question_count} 题 · ${b.description ? escHtml(b.description) : ''}</p>
               <p class="card-text"><small class="text-muted">更新于 ${new Date(b.updated_at).toLocaleDateString('zh-CN')}</small></p>
               <a href="#/banks/${b.id}" class="btn btn-outline-primary btn-sm">详情</a>
-              <button class="btn btn-outline-danger btn-sm ms-1" onclick="confirmDeleteBank(${b.id}, '${escHtml(b.title)}')">删除</button>
+              <button class="btn btn-outline-danger btn-sm ms-1" data-bank-id="${b.id}" onclick="confirmDeleteBank(this.dataset.bankId)">删除</button>
             </div>
           </div>
         </div>
@@ -1911,7 +1911,9 @@ function downloadSample() {
   a.click();
 }
 
-function confirmDeleteBank(id, title) {
+function confirmDeleteBank(id) {
+  const card = document.querySelector(`[data-bank-id="${id}"]`)?.closest('.card');
+  const title = card ? card.querySelector('.card-title')?.textContent : '(未知)';
   if (!confirm(`确定删除题库「${title}」吗？该操作不可恢复。`)) return;
   api.deleteBank(id).then(() => router.navigate('/banks')).catch(err => alert(err.message));
 }
