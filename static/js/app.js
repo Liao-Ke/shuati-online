@@ -2125,7 +2125,7 @@ async function saveQForm() {
 
   let options = null;
   if (type === 'choice' || type === 'multiple') {
-    options = optionsText.split('\n').filter(l => l.trim());
+    options = optionsText.split('\n').map(l => l.replace(/^[A-Z]\.\s*/, '').trim()).filter(Boolean);
     if (options.length < 2) { alert(`${type === 'choice' ? '选择' : '多选'}题至少需要 2 个选项`); return; }
   }
 
