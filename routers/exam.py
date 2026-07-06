@@ -67,7 +67,7 @@ def start_exam(data: ExamStart, user: User = Depends(get_current_user), db: Sess
     questions = []
     for bank in banks:
         for q in bank.questions:
-            if data.types and q.type not in data.types:
+            if data.types is not None and q.type not in data.types:
                 continue
             if data.chapters is not None and q.chapter not in data.chapters:
                 continue
