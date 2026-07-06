@@ -1889,7 +1889,8 @@ async function doImport() {
         router.resolve();
       }, 800);
     } else {
-      btn.disabled = false; btn.innerHTML = '确认导入（仅导入成功的）';
+      importFileList = importFileList.filter((_, i) => !res.results[i]?.success);
+      btn.disabled = false; btn.innerHTML = '重试失败项';
     }
   } catch (err) {
     preview.innerHTML = `<div class="alert alert-danger">导入失败: ${escHtml(err.message)}</div>`;
