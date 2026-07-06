@@ -652,6 +652,28 @@ def test_26_filter_reviewing_only(client, auth_headers):
     assert len(known_ids) == 0
 
 
+def test_26a_filter_reviewing_only_excludes_unmarked(client, auth_headers):
+    # 第一道题在 test_26 已标记为 known；取第二道题标记为 reviewing
+    r = client.post("/api/review/questions", json={
+        "bank_ids": [state.bank_id],
+    }, headers=auth_headers)
+    questions = r.json()
+    reviewing_qid = questions[1]["id"]
+    r = client.post("/api/review/mark", json={
+        "question_id": reviewing_qid, "status": "reviewing",
+    }, headers=auth_headers)
+    assert r.status_code == 200
+
+    r = client.post("/api/review/questions", json={
+        "bank_ids": [state.bank_id],
+        "show_reviewing_only": True,
+    }, headers=auth_headers)
+    filtered = r.json()
+    # 只看需复习：仅返回 reviewing 题，known 与未标记(None)题都不应出现
+    assert [q["id"] for q in filtered] == [reviewing_qid]
+    assert all(q["review_status"] == "reviewing" for q in filtered)
+
+
 def test_27_review_type_filter_choice(client, auth_headers):
     r = client.post("/api/review/questions", json={
         "bank_ids": [state.bank_id],
