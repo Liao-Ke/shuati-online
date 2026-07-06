@@ -25,7 +25,12 @@ const api = {
     if (res.status === 204) return null;
     const data = await res.json();
     if (!res.ok) {
-      throw new Error(data.detail || '请求失败');
+      // slowapi 限流返回 {error: "Rate limit exceeded: ..."}，FastAPI 异常返回 {detail: "..."}，两者兼容
+      // 429 使用文档约定的中文友好提示（docs/api/endpoints.md）
+      const msg = res.status === 429
+        ? '请求过于频繁，请稍后重试'
+        : (data.detail || data.error || '请求失败');
+      throw new Error(msg);
     }
     return data;
   },

@@ -107,6 +107,19 @@ def test_01e_register_validation(client):
     assert r.status_code == 400
 
 
+def test_01f_rate_limit_429_returns_error_field(client):
+    """429 限流响应体包含 error 字段，前端 api.request 据此展示中文友好提示（#85）"""
+    from routers.limiter import limiter
+    limiter._storage.reset()  # 清空限流计数，确保本测试可独立复现
+    # login 接口限流 5/minute，前 5 次正常返回 401，第 6 次触发 429
+    for _ in range(5):
+        r = client.post("/api/auth/login", json={"username": "no_such_user", "password": "x"})
+        assert r.status_code == 401
+    r = client.post("/api/auth/login", json={"username": "no_such_user", "password": "x"})
+    assert r.status_code == 429
+    assert "error" in r.json(), "429 响应体必须包含 error 字段，前端据此展示限流提示"
+
+
 def test_02_import_bank(client, auth_headers):
     r = client.post("/api/question-banks/import", json=BANK_DATA, headers=auth_headers)
     assert r.status_code == 201, f"导入失败: {r.text}"
