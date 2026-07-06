@@ -959,8 +959,10 @@ def test_50_submit_answer_path_body_mismatch(client, auth_headers):
     assert r.status_code == 400, f"路径/请求体不一致应返回 400: {r.text}"
     assert "不一致" in r.json()["detail"]
 
-    # examA 进度仍为空，未被写入
+    # 两场考试进度均为空，未被写入
     r = client.get(f"/api/exam/{exam_a}/progress", headers=auth_headers)
+    assert r.json()["answers"] == []
+    r = client.get(f"/api/exam/{exam_b}/progress", headers=auth_headers)
     assert r.json()["answers"] == []
 
     # 路径与请求体一致 → 200（向后兼容，正常受理）
