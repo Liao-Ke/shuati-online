@@ -282,7 +282,7 @@ from utils import parse_json_field
 
 # 写入
 bank_ids_str = json.dumps([1, 2, 3])
-options_str = json.dumps(["A.1", "B.2"], ensure_ascii=False)
+options_str = json.dumps(["1", "2"], ensure_ascii=False)
 
 # 读取（统一使用 parse_json_field）
 bank_ids = parse_json_field(exam.bank_ids)
