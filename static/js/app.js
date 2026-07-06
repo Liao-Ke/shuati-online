@@ -523,15 +523,16 @@ function examKeyHandler(e) {
 router.add('/result/:id', async ({ id }) => {
   if (examElapsedInterval) clearInterval(examElapsedInterval);
   window.removeEventListener('scroll', trackPreviewScroll);
-  sessionStorage.removeItem('activeExamId');
-  sessionStorage.removeItem('examCurrentIndex');
-  sessionStorage.removeItem('examMode');
-  sessionStorage.removeItem('examTimerMode');
-  sessionStorage.removeItem('examStartedAt');
   showNav();
   render('<div class="text-center py-5"><div class="spinner-border"></div></div>');
   try {
     const result = await api.getExamResult(id);
+    // 结果接口成功后才清理恢复状态，避免未完成考试误删
+    sessionStorage.removeItem('activeExamId');
+    sessionStorage.removeItem('examCurrentIndex');
+    sessionStorage.removeItem('examMode');
+    sessionStorage.removeItem('examTimerMode');
+    sessionStorage.removeItem('examStartedAt');
     // 后端对已完成考试始终返回真实统计（未作答题已计入 wrong_count），汇总直接用后端值；
     // answers.length 仅用于判断明细列表是否为空，不再决定汇总显示（issue #50）
     const acc = (result.accuracy * 100).toFixed(0);
@@ -578,8 +579,19 @@ router.add('/result/:id', async ({ id }) => {
         </div>
       `;
     });
-  } catch {
-    render('<div class="alert alert-danger">加载失败</div>');
+  } catch (err) {
+    if (err.status === 409) {
+      render(`
+        <div class="text-center py-5">
+          <div class="alert alert-warning d-inline-block">
+            <p class="mb-3">考试尚未完成，无法查看结果。</p>
+            <a href="#/exam" class="btn btn-primary">继续作答</a>
+          </div>
+        </div>
+      `);
+    } else {
+      render('<div class="alert alert-danger">加载失败</div>');
+    }
   }
 });
 

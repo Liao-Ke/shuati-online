@@ -25,7 +25,9 @@ const api = {
     if (res.status === 204) return null;
     const data = await res.json();
     if (!res.ok) {
-      throw new Error(data.detail || '请求失败');
+      const err = new Error(data.detail || '请求失败');
+      err.status = res.status;
+      throw err;
     }
     return data;
   },
