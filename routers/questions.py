@@ -26,6 +26,8 @@ def _validate_question(type_, content, options, answer):
     if type_ == "choice":
         if not options or len(options) < 2:
             errors.append("选择题至少需要 2 个选项")
+        if options and any(not o.strip() for o in options):
+            errors.append("选择题选项不能包含空白字符串")
         if not answer or not isinstance(answer, str):
             errors.append("选择题答案必须为字符串（如 'A'）")
         elif options:
@@ -44,6 +46,8 @@ def _validate_question(type_, content, options, answer):
     elif type_ == "multiple":
         if not options or len(options) < 2:
             errors.append("多选题至少需要 2 个选项")
+        if options and any(not o.strip() for o in options):
+            errors.append("多选题选项不能包含空白字符串")
         if not isinstance(answer, list) or len(answer) < 1:
             errors.append("多选题答案必须为非空数组（如 ['A', 'C']）")
         elif options:
