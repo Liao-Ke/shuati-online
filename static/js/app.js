@@ -402,7 +402,7 @@ router.add('/exam/setup', async () => {
     banks.forEach(b => {
       bankSelect.innerHTML += `
         <div class="col-md-4 col-6">
-          <div class="bank-check-card" data-question-count="${b.question_count}" onclick="toggleBankSelect(this)">
+          <div class="bank-check-card" data-question-count="${b.question_count}" onclick="toggleBankSelect(this, event)">
             <div class="form-check">
               <input type="checkbox" class="form-check-input bank-checkbox" value="${b.id}">
               <label class="form-check-label">${escHtml(b.title)} <span class="text-muted">(${b.question_count} 题)</span></label>
@@ -777,7 +777,7 @@ router.add('/review/setup', async () => {
     banks.forEach(b => {
       bankSelect.innerHTML += `
         <div class="col-md-4 col-6">
-          <div class="bank-check-card" onclick="toggleReviewBankSelect(this)">
+          <div class="bank-check-card" onclick="toggleReviewBankSelect(this, event)">
             <div class="form-check">
               <input type="checkbox" class="form-check-input review-bank-checkbox" value="${b.id}">
               <label class="form-check-label">${escHtml(b.title)} <span class="text-muted">(${b.question_count} 题)</span></label>
@@ -798,10 +798,14 @@ router.add('/review/setup', async () => {
   }
 });
 
-function toggleReviewBankSelect(el) {
+function toggleReviewBankSelect(el, e) {
   const cb = el.querySelector('.review-bank-checkbox');
-  cb.checked = !cb.checked;
-  el.classList.toggle('selected');
+  if (e && e.target === cb) {
+    el.classList.toggle('selected', cb.checked);
+  } else {
+    cb.checked = !cb.checked;
+    el.classList.toggle('selected');
+  }
   const count = document.querySelectorAll('.review-bank-checkbox:checked').length;
   document.getElementById('review-selected-count').textContent = `已选 ${count} 个题库`;
   updateReviewChapters();
@@ -1125,10 +1129,14 @@ function selectTimerMode(el) {
   document.getElementById('per-question-timeouts').style.display = mode === 'per_question' ? '' : 'none';
 }
 
-function toggleBankSelect(el) {
+function toggleBankSelect(el, e) {
   const cb = el.querySelector('.bank-checkbox');
-  cb.checked = !cb.checked;
-  el.classList.toggle('selected');
+  if (e && e.target === cb) {
+    el.classList.toggle('selected', cb.checked);
+  } else {
+    cb.checked = !cb.checked;
+    el.classList.toggle('selected');
+  }
   const count = document.querySelectorAll('.bank-checkbox:checked').length;
   document.getElementById('selected-count').textContent = `已选 ${count} 个题库`;
   updateQuestionCount();
