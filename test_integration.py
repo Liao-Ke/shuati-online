@@ -1335,3 +1335,63 @@ def test_68_submit_answer_allows_null_answer(client, auth_headers):
         "user_answer": None, "time_spent_seconds": 3,
     }, headers=auth_headers)
     assert r.status_code == 200
+
+
+# ── Test: 章节名含双引号时筛选不截断（issue #75）──
+
+
+QUOTE_CHAPTER_BANK = {
+    "title": "双引号章节测试",
+    "questions": [
+        {"type": "choice", "chapter": "第\"一\"章", "content": "1+1=?", "options": ["1", "2", "3", "4"], "answer": "B"},
+        {"type": "fill", "chapter": "第\"一\"章", "content": "中国的首都是____", "answer": "北京"},
+        {"type": "judge", "chapter": "普通章节", "content": "地球是圆的", "answer": "对"},
+    ],
+}
+
+
+def test_77_quote_chapter_import(client, auth_headers):
+    r = client.post("/api/question-banks/import", json=QUOTE_CHAPTER_BANK, headers=auth_headers)
+    assert r.status_code == 201, f"导入失败: {r.text}"
+    state._quote_bank_id = r.json()["id"]
+
+
+def test_78_quote_chapter_review_chapters(client, auth_headers):
+    r = client.post("/api/review/chapters", json={
+        "bank_ids": [state._quote_bank_id],
+    }, headers=auth_headers)
+    assert r.status_code == 200
+    chapters = r.json()
+    assert "第\"一\"章" in chapters, f"章节列表应包含完整的双引号章节名: {chapters}"
+
+
+def test_79_quote_chapter_exam_start_filter(client, auth_headers):
+    r = client.post("/api/exam/start", json={
+        "bank_ids": [state._quote_bank_id], "mode": "sequential",
+        "chapters": ["第\"一\"章"],
+    }, headers=auth_headers)
+    assert r.status_code == 200
+    data = r.json()
+    assert data["total_count"] == 2, f"按双引号章节筛选应返回 2 题，实际 {data['total_count']}"
+    exam_id = data["exam_id"]
+    r = client.get(f"/api/exam/{exam_id}/current", headers=auth_headers)
+    assert r.status_code == 200
+    assert r.json()["question"]["chapter"] == "第\"一\"章"
+    client.post(f"/api/exam/{exam_id}/finish", json={}, headers=auth_headers)
+
+
+def test_80_quote_chapter_review_questions_filter(client, auth_headers):
+    r = client.post("/api/review/questions", json={
+        "bank_ids": [state._quote_bank_id],
+        "chapters": ["第\"一\"章"],
+    }, headers=auth_headers)
+    assert r.status_code == 200
+    questions = r.json()
+    assert len(questions) == 2, f"背题模式按双引号章节筛选应返回 2 题，实际 {len(questions)}"
+    for q in questions:
+        assert q["chapter"] == "第\"一\"章"
+
+
+def test_81_quote_chapter_cleanup(client, auth_headers):
+    client.delete(f"/api/question-banks/{state._quote_bank_id}", headers=auth_headers)
+
