@@ -24,6 +24,8 @@ def register(data: UserRegister, request: Request, db: Session = Depends(get_db)
         raise HTTPException(status_code=400, detail="用户名不能超过 50 个字符")
     if len(data.password) < 6:
         raise HTTPException(status_code=400, detail="密码至少 6 个字符")
+    if len(data.password.encode("utf-8")) > 72:
+        raise HTTPException(status_code=400, detail="密码不能超过 72 字节")
     existing = db.query(User).filter(User.username == username).first()
     if existing:
         raise HTTPException(status_code=400, detail="用户名已存在")
