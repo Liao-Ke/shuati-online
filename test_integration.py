@@ -1225,3 +1225,101 @@ def test_63_submit_answer_rejects_negative_duration(client, auth_headers):
     assert r.status_code == 200
     r = client.get(f"/api/exam/{exam_id}/result", headers=auth_headers)
     assert r.json()["duration_seconds"] >= 0
+
+
+# ── Test: submit_answer 校验提交答案选项范围（issue #55）──
+
+
+def _ensure_test_bank(client, auth_headers):
+    if state.bank_id is not None:
+        return
+    data = {**BANK_DATA, "title": f"提交答案校验-{uuid.uuid4().hex[:8]}"}
+    r = client.post("/api/question-banks/import", json=data, headers=auth_headers)
+    assert r.status_code == 201, f"导入失败: {r.text}"
+    state.bank_id = r.json()["id"]
+
+
+def _start_exam_question(client, auth_headers, question_type):
+    _ensure_test_bank(client, auth_headers)
+    r = client.post("/api/exam/start", json={
+        "bank_ids": [state.bank_id], "mode": "sequential",
+        "types": [question_type],
+        "choice_timeout": 30, "judge_fill_timeout": 60,
+    }, headers=auth_headers)
+    assert r.status_code == 200
+    exam_id = r.json()["exam_id"]
+    r = client.get(f"/api/exam/{exam_id}/current", headers=auth_headers)
+    assert r.status_code == 200
+    return exam_id, r.json()["question"]["id"]
+
+
+def _assert_exam_has_no_answers(client, auth_headers, exam_id):
+    r = client.get(f"/api/exam/{exam_id}/progress", headers=auth_headers)
+    assert r.status_code == 200
+    assert r.json()["answers"] == []
+
+
+def test_64_submit_answer_rejects_invalid_choice_option(client, auth_headers):
+    """选择题提交不存在的选项标签时返回 400，且不写入答题记录（issue #55）"""
+    exam_id, qid = _start_exam_question(client, auth_headers, "choice")
+    r = client.post(f"/api/exam/{exam_id}/answer", json={
+        "exam_id": exam_id, "question_id": qid,
+        "user_answer": "Z", "time_spent_seconds": 3,
+    }, headers=auth_headers)
+    assert r.status_code == 400
+    assert "无效选项" in r.text
+    _assert_exam_has_no_answers(client, auth_headers, exam_id)
+
+
+def test_65_submit_answer_rejects_invalid_choice_answer_type(client, auth_headers):
+    """选择题提交列表答案时返回明确错误，避免落到选项不存在分支（issue #55）"""
+    exam_id, qid = _start_exam_question(client, auth_headers, "choice")
+    r = client.post(f"/api/exam/{exam_id}/answer", json={
+        "exam_id": exam_id, "question_id": qid,
+        "user_answer": ["A"], "time_spent_seconds": 3,
+    }, headers=auth_headers)
+    assert r.status_code == 400
+    assert "字符串" in r.text
+    _assert_exam_has_no_answers(client, auth_headers, exam_id)
+
+
+def test_66_submit_answer_rejects_invalid_judge_answer(client, auth_headers):
+    """判断题只接受“对”或“错”（issue #55）"""
+    exam_id, qid = _start_exam_question(client, auth_headers, "judge")
+    r = client.post(f"/api/exam/{exam_id}/answer", json={
+        "exam_id": exam_id, "question_id": qid,
+        "user_answer": "A", "time_spent_seconds": 3,
+    }, headers=auth_headers)
+    assert r.status_code == 400
+    assert "判断题答案" in r.text
+    _assert_exam_has_no_answers(client, auth_headers, exam_id)
+
+
+def test_67_submit_answer_rejects_invalid_multiple_answer(client, auth_headers):
+    """多选题拒绝重复答案和不存在的选项标签（issue #55）"""
+    exam_id, qid = _start_exam_question(client, auth_headers, "multiple")
+    r = client.post(f"/api/exam/{exam_id}/answer", json={
+        "exam_id": exam_id, "question_id": qid,
+        "user_answer": ["A", "A"], "time_spent_seconds": 3,
+    }, headers=auth_headers)
+    assert r.status_code == 400
+    assert "重复" in r.text
+    _assert_exam_has_no_answers(client, auth_headers, exam_id)
+
+    r = client.post(f"/api/exam/{exam_id}/answer", json={
+        "exam_id": exam_id, "question_id": qid,
+        "user_answer": ["A", "Z"], "time_spent_seconds": 3,
+    }, headers=auth_headers)
+    assert r.status_code == 400
+    assert "无效选项" in r.text
+    _assert_exam_has_no_answers(client, auth_headers, exam_id)
+
+
+def test_68_submit_answer_allows_null_answer(client, auth_headers):
+    """空答案仍允许提交，用于保留跳过/未作答的兼容行为（issue #55）"""
+    exam_id, qid = _start_exam_question(client, auth_headers, "choice")
+    r = client.post(f"/api/exam/{exam_id}/answer", json={
+        "exam_id": exam_id, "question_id": qid,
+        "user_answer": None, "time_spent_seconds": 3,
+    }, headers=auth_headers)
+    assert r.status_code == 200

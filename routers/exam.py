@@ -222,6 +222,8 @@ def submit_answer(
     if question.type == "choice" and data.user_answer is not None:
         if not valid_labels:
             raise HTTPException(status_code=400, detail="题目选项数据异常")
+        if not isinstance(data.user_answer, str):
+            raise HTTPException(status_code=400, detail="选择题答案必须为字符串")
         if data.user_answer not in valid_labels:
             raise HTTPException(status_code=400, detail=f"无效选项：{data.user_answer}")
     elif question.type == "judge" and data.user_answer is not None:
