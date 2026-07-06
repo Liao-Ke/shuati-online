@@ -178,7 +178,15 @@ def exam_progress(
 
 
 @router.post("/{exam_id}/answer", response_model=AnswerResult)
-def submit_answer(data: AnswerSubmit, user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+def submit_answer(
+    exam_id: int,
+    data: AnswerSubmit,
+    user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    # 信任边界校验：路径 exam_id 必须与请求体 exam_id 一致，否则拒绝（issue #46）
+    if exam_id != data.exam_id:
+        raise HTTPException(status_code=400, detail="路径 exam_id 与请求体 exam_id 不一致")
     exam = db.query(ExamRecord).filter(
         ExamRecord.id == data.exam_id, ExamRecord.user_id == user.id
     ).first()

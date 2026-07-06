@@ -30,6 +30,10 @@ def _validate_question(type_, content, options, answer):
             errors.append("选择题选项不能包含空白字符串")
         if not answer or not isinstance(answer, str):
             errors.append("选择题答案必须为字符串（如 'A'）")
+        elif options:
+            valid_labels = [chr(65 + i) for i in range(len(options))]
+            if answer not in valid_labels:
+                errors.append(f"选择题答案 '{answer}' 不属于现有选项 {valid_labels}")
     elif type_ == "fill":
         if isinstance(answer, list):
             if any(not a or not a.strip() for a in answer):
@@ -46,6 +50,13 @@ def _validate_question(type_, content, options, answer):
             errors.append("多选题选项不能包含空白字符串")
         if not isinstance(answer, list) or len(answer) < 1:
             errors.append("多选题答案必须为非空数组（如 ['A', 'C']）")
+        elif options:
+            valid_labels = [chr(65 + i) for i in range(len(options))]
+            invalid = [a for a in answer if a not in valid_labels]
+            if invalid:
+                errors.append(f"多选题答案 {invalid} 不属于现有选项 {valid_labels}")
+            if len(set(answer)) != len(answer):
+                errors.append("多选题答案不能包含重复选项")
     return errors
 
 

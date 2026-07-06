@@ -40,6 +40,10 @@ def validate_bank_import(data: BankImport) -> list[str]:
                 errors.append(f"{prefix}(选择题): 选项不能包含空白字符串")
             if not q.answer or not isinstance(q.answer, str):
                 errors.append(f"{prefix}(选择题): 答案必须为字符串（如 'A'）")
+            elif q.options:
+                valid_labels = [chr(65 + i) for i in range(len(q.options))]
+                if q.answer not in valid_labels:
+                    errors.append(f"{prefix}(选择题): 答案 '{q.answer}' 不属于现有选项 {valid_labels}")
         elif q.type == "fill":
             if isinstance(q.answer, list):
                 if any(not a or not a.strip() for a in q.answer):
@@ -56,6 +60,13 @@ def validate_bank_import(data: BankImport) -> list[str]:
                 errors.append(f"{prefix}(多选题): 选项不能包含空白字符串")
             if not isinstance(q.answer, list) or len(q.answer) < 1:
                 errors.append(f"{prefix}(多选题): 答案必须为非空数组（如 ['A', 'C']）")
+            elif q.options:
+                valid_labels = [chr(65 + i) for i in range(len(q.options))]
+                invalid = [a for a in q.answer if a not in valid_labels]
+                if invalid:
+                    errors.append(f"{prefix}(多选题): 答案 {invalid} 不属于现有选项 {valid_labels}")
+                if len(set(q.answer)) != len(q.answer):
+                    errors.append(f"{prefix}(多选题): 答案不能包含重复选项")
     return errors
 
 
