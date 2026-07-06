@@ -532,10 +532,11 @@ router.add('/result/:id', async ({ id }) => {
   render('<div class="text-center py-5"><div class="spinner-border"></div></div>');
   try {
     const result = await api.getExamResult(id);
-    const hasAnswers = result.answers.length > 0;
-    const acc = hasAnswers ? (result.accuracy * 100).toFixed(0) : '—';
-    const cc = hasAnswers ? result.correct_count : '—';
-    const wc = hasAnswers ? result.wrong_count : '—';
+    // 后端对已完成考试始终返回真实统计（未作答题已计入 wrong_count），汇总直接用后端值；
+    // answers.length 仅用于判断明细列表是否为空，不再决定汇总显示（issue #50）
+    const acc = (result.accuracy * 100).toFixed(0);
+    const cc = result.correct_count;
+    const wc = result.wrong_count;
     render(`
       <div class="page-header text-center">
         <h2 class="result-title">答题完成！</h2>
@@ -550,12 +551,12 @@ router.add('/result/:id', async ({ id }) => {
       <div id="result-answers"></div>
       <div class="d-flex gap-2 mt-3">
         <a href="#/exam/setup" class="btn btn-primary">再来一次</a>
-        ${hasAnswers ? `<a href="#/history/${result.exam_id}" class="btn btn-outline-primary">查看详情</a>` : ''}
+        <a href="#/history/${result.exam_id}" class="btn btn-outline-primary">查看详情</a>
         <a href="#/dashboard" class="btn btn-outline-secondary">返回首页</a>
       </div>
     `);
     const container = document.getElementById('result-answers');
-    if (!hasAnswers) {
+    if (!result.answers.length) {
       container.innerHTML = '<div class="empty-state"><p>还没有作答记录</p></div>';
       return;
     }
@@ -640,19 +641,19 @@ router.add('/history/:id', async ({ id }) => {
   render('<div class="text-center py-5"><div class="spinner-border"></div></div>');
   try {
     const result = await api.getHistoryDetail(id);
-    const hasAnswers = result.answers.length > 0;
-    const acc = hasAnswers ? (result.accuracy * 100).toFixed(0) : '—';
-    const cc = hasAnswers ? result.correct_count : '—';
+    // 后端对已完成考试始终返回真实统计，汇总直接用后端值（issue #50）
+    const acc = (result.accuracy * 100).toFixed(0);
+    const cc = result.correct_count;
     render(`
       <div class="page-header">
         <h2><a href="#/history" class="text-decoration-none me-2">&larr;</a>练习回顾</h2>
-        <p class="text-muted">${cc}/${hasAnswers ? result.total_count : '—'} 正确 · ${acc}% · ${result.duration_seconds}s</p>
+        <p class="text-muted">${cc}/${result.total_count} 正确 · ${acc}% · ${result.duration_seconds}s</p>
       </div>
       <div id="history-answers"></div>
       <div class="mt-3"><a href="#/exam/setup" class="btn btn-primary">重新练习</a></div>
     `);
     const container = document.getElementById('history-answers');
-    if (!hasAnswers) {
+    if (!result.answers.length) {
       container.innerHTML = '<div class="empty-state"><p>该练习还没有作答记录</p></div>';
       return;
     }
