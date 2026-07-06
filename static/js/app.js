@@ -1467,6 +1467,8 @@ async function toggleExamMode() {
   sessionStorage.setItem('examMode', examFullPreview ? 'preview' : 'single');
   const btn = document.getElementById('mode-toggle-btn');
   if (examFullPreview) {
+    // 进入整卷模式：停止单题倒计时，避免归零后后台自动提交当前题（#52）
+    if (examTimerInterval) { clearInterval(examTimerInterval); examTimerInterval = null; }
     btn.textContent = '📖 单题模式';
     document.querySelector('.exam-layout')?.classList.add('exam-layout-preview');
     document.getElementById('prev-btn').style.display = 'none';
