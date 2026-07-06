@@ -190,7 +190,7 @@ if question_ids: 过滤到选中的子集
 |----------|------|--------|-------------|
 | ExamRecord | bank_ids | `"[1, 2, 3]"` | 总是 JSON |
 | ExamRecord | question_ids | `"[4, 7, 12]"` 或 `null` | 非 null 则 JSON |
-| Question | options | `'["A. 1", "B. 2"]'` 或 `null` | 非 null 则 JSON |
+| Question | options | `'["1", "2"]'` 或 `null` | 非 null 则 JSON |
 | Question | answer | 多空填空时 `'["纸","印刷"]'`；其他为普通字符串 | `parse_json_field()` |
 | AnswerRecord | user_answer | 列表答案时 `'["答案1","答案2"]'`；否则原始字符串 | `parse_json_field()` |
 
