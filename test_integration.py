@@ -209,6 +209,17 @@ def test_04_start_exam(client, auth_headers):
     assert r.json()["total_count"] == 5
 
 
+def test_04a_start_exam_rejects_nonpositive_count(client, auth_headers):
+    """question_count 为 0/负数时应在请求边界被拒为 422（issue #45）。
+    None 表示用全部题目，其行为由 test_04（省略该字段）覆盖。"""
+    for bad in (-1, 0):
+        r = client.post("/api/exam/start", json={
+            "bank_ids": [state.bank_id], "mode": "random",
+            "question_count": bad,
+        }, headers=auth_headers)
+        assert r.status_code == 422, f"question_count={bad} 应被拒绝，实际 {r.status_code}"
+
+
 def test_05_answer_all(client, auth_headers):
     exam_id = state.exam_id
     correct_count = 0
