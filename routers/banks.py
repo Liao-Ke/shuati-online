@@ -36,6 +36,8 @@ def validate_bank_import(data: BankImport) -> list[str]:
         if q.type == "choice":
             if not q.options or len(q.options) < 2:
                 errors.append(f"{prefix}(选择题): 至少需要 2 个选项")
+            if q.options and len(q.options) > 8:
+                errors.append(f"{prefix}(选择题): 选项不能超过 8 个（A-H）")
             if q.options and any(not o.strip() for o in q.options):
                 errors.append(f"{prefix}(选择题): 选项不能包含空白字符串")
             if not q.answer or not isinstance(q.answer, str):
@@ -56,6 +58,8 @@ def validate_bank_import(data: BankImport) -> list[str]:
         elif q.type == "multiple":
             if not q.options or len(q.options) < 2:
                 errors.append(f"{prefix}(多选题): 至少需要 2 个选项")
+            if q.options and len(q.options) > 8:
+                errors.append(f"{prefix}(多选题): 选项不能超过 8 个（A-H）")
             if q.options and any(not o.strip() for o in q.options):
                 errors.append(f"{prefix}(多选题): 选项不能包含空白字符串")
             if not isinstance(q.answer, list) or len(q.answer) < 1:

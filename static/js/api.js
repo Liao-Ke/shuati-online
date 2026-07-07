@@ -1,4 +1,15 @@
 const API_BASE = '/api';
+const AUTH_PATHS = ['/auth/login', '/auth/register', '/auth/me'];
+
+function _isAuthPath(path) {
+  return AUTH_PATHS.some(p => path === p || path.startsWith(p + '?'));
+}
+
+function _handle401(path) {
+  if (_isAuthPath(path)) return;
+  api.setToken(null);
+  window.dispatchEvent(new CustomEvent('auth-expired'));
+}
 
 const api = {
   token: localStorage.getItem('token'),
@@ -25,12 +36,13 @@ const api = {
     if (res.status === 204) return null;
     const data = await res.json();
     if (!res.ok) {
-      // slowapi 限流返回 {error: "Rate limit exceeded: ..."}，FastAPI 异常返回 {detail: "..."}，两者兼容
-      // 429 使用文档约定的中文友好提示（docs/api/endpoints.md）
+      if (res.status === 401) _handle401(path);
       const msg = res.status === 429
         ? '请求过于频繁，请稍后重试'
         : (data.detail || data.error || '请求失败');
-      throw new Error(msg);
+      const err = new Error(msg);
+      err.status = res.status;
+      throw err;
     }
     return data;
   },
@@ -76,6 +88,7 @@ const api = {
     if (this.token) headers['Authorization'] = `Bearer ${this.token}`;
     const res = await fetch(`${API_BASE}/question-banks/${bankId}/export`, { headers });
     if (!res.ok) {
+      if (res.status === 401) _handle401(`/question-banks/${bankId}/export`);
       const err = await res.json().catch(() => ({}));
       throw new Error(err.detail || '导出失败');
     }
