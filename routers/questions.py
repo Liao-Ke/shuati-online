@@ -114,6 +114,7 @@ def update_question(
     ).first()
     if not question:
         raise HTTPException(status_code=404, detail="题目不存在")
+
     new_type = data.type if data.type is not None else question.type
     new_content = data.content if data.content is not None else question.content
     new_chapter = data.chapter if data.chapter is not None else question.chapter
