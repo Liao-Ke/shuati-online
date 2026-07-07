@@ -4,7 +4,7 @@ const path = require('node:path');
 const test = require('node:test');
 const vm = require('node:vm');
 
-function loadHelpers() {
+function loadHelpers(overrides = {}) {
   const source = fs.readFileSync(path.join(__dirname, '../../static/js/app.js'), 'utf8');
   const storage = new Map();
   const documentStub = {
@@ -19,7 +19,22 @@ function loadHelpers() {
       return results;
     },
     getElementById(id) {
-      if (!this.elements.has(id)) this.elements.set(id, { textContent: '', style: {}, value: '1', max: '1', innerHTML: '' });
+      if (!this.elements.has(id)) {
+        const classes = new Set();
+        this.elements.set(id, {
+          textContent: '',
+          style: {},
+          value: '1',
+          max: '1',
+          innerHTML: '',
+          classList: {
+            add(name) { classes.add(name); },
+            remove(name) { classes.delete(name); },
+            contains(name) { return classes.has(name); },
+            toggle(name, force) { force ? classes.add(name) : classes.delete(name); },
+          },
+        });
+      }
       return this.elements.get(id);
     },
   };
@@ -28,6 +43,7 @@ function loadHelpers() {
     location: { hash: '' },
     window: { addEventListener() {}, removeEventListener() {} },
     document: documentStub,
+    api: overrides.api || {},
     sessionStorage: {
       getItem(key) { return storage.has(key) ? storage.get(key) : null; },
       setItem(key, value) { storage.set(key, String(value)); },
@@ -41,7 +57,8 @@ __exports.formatBankDisplayName = formatBankDisplayName;
 __exports.isWrongPracticeBankChecked = isWrongPracticeBankChecked;
 __exports.toggleBankSelect = toggleBankSelect;
 __exports.toggleReviewBankSelect = toggleReviewBankSelect;
-__exports.filterRetryImportFiles = filterRetryImportFiles;`, context);
+__exports.filterRetryImportFiles = filterRetryImportFiles;
+__exports.router = router;`, context);
   return { ...context.__exports, sessionStorage: context.sessionStorage, document: context.document };
 }
 
@@ -149,4 +166,51 @@ test('batch import retry keeps only failed or unknown-result items', () => {
     filterRetryImportFiles([validA, invalidB, unknownC], [{ success: true }, { success: false }]),
     [invalidB, unknownC],
   );
+});
+
+
+test('unfinished result page keeps exam session state and offers continue action', async () => {
+  const { router, sessionStorage, document } = loadHelpers({
+    api: {
+      async getExamResult() {
+        const err = new Error('考试尚未完成');
+        err.status = 409;
+        throw err;
+      },
+    },
+  });
+  sessionStorage.setItem('activeExamId', '42');
+  sessionStorage.setItem('examCurrentIndex', '2');
+  sessionStorage.setItem('examMode', 'sequential');
+
+  await router.routes['/result/:id'].handler({ id: '42' });
+
+  assert.equal(sessionStorage.getItem('activeExamId'), '42');
+  assert.equal(sessionStorage.getItem('examCurrentIndex'), '2');
+  const html = document.getElementById('content').innerHTML;
+  assert.match(html, /考试尚未完成/);
+  assert.match(html, /#\/exam/);
+});
+
+test('finished result page clears exam session state after result loads', async () => {
+  const result = {
+    exam_id: 42,
+    accuracy: 1,
+    correct_count: 1,
+    wrong_count: 0,
+    duration_seconds: 8,
+    answers: [],
+  };
+  const { router, sessionStorage } = loadHelpers({
+    api: { async getExamResult() { return result; } },
+  });
+  ['activeExamId', 'examCurrentIndex', 'examMode', 'examTimerMode', 'examStartedAt', 'examTimeouts'].forEach((key) => {
+    sessionStorage.setItem(key, 'kept-before-result');
+  });
+
+  await router.routes['/result/:id'].handler({ id: '42' });
+
+  ['activeExamId', 'examCurrentIndex', 'examMode', 'examTimerMode', 'examStartedAt', 'examTimeouts'].forEach((key) => {
+    assert.equal(sessionStorage.getItem(key), null, `${key} should be cleared after successful result load`);
+  });
 });
