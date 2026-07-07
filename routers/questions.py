@@ -26,6 +26,8 @@ def _validate_question(type_, content, options, answer):
     if type_ == "choice":
         if not options or len(options) < 2:
             errors.append("选择题至少需要 2 个选项")
+        if options and len(options) > 8:
+            errors.append("选择题选项不能超过 8 个（A-H）")
         if options and any(not o.strip() for o in options):
             errors.append("选择题选项不能包含空白字符串")
         if not answer or not isinstance(answer, str):
@@ -46,6 +48,8 @@ def _validate_question(type_, content, options, answer):
     elif type_ == "multiple":
         if not options or len(options) < 2:
             errors.append("多选题至少需要 2 个选项")
+        if options and len(options) > 8:
+            errors.append("多选题选项不能超过 8 个（A-H）")
         if options and any(not o.strip() for o in options):
             errors.append("多选题选项不能包含空白字符串")
         if not isinstance(answer, list) or len(answer) < 1:

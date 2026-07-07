@@ -1543,3 +1543,146 @@ def test_80_quote_chapter_review_questions_filter(client, auth_headers):
 def test_81_quote_chapter_cleanup(client, auth_headers):
     client.delete(f"/api/question-banks/{state._quote_bank_id}", headers=auth_headers)
 
+
+# ── Test: 选择题/多选题选项上限 8 个（issue #53）──
+
+
+def _make_options(count: int) -> list[str]:
+    return [str(i) for i in range(1, count + 1)]
+
+
+def test_69_import_rejects_choice_with_nine_options(client, auth_headers):
+    data = {
+        "title": "9选项选择题",
+        "questions": [
+            {"type": "choice", "content": "x", "options": _make_options(9), "answer": "I"},
+        ],
+    }
+    r = client.post("/api/question-banks/import", json=data, headers=auth_headers)
+    assert r.status_code == 400
+    assert "不能超过 8 个" in r.text
+
+
+def test_70_import_rejects_multiple_with_nine_options(client, auth_headers):
+    data = {
+        "title": "9选项多选题",
+        "questions": [
+            {"type": "multiple", "content": "x", "options": _make_options(9), "answer": ["A", "I"]},
+        ],
+    }
+    r = client.post("/api/question-banks/import", json=data, headers=auth_headers)
+    assert r.status_code == 400
+    assert "不能超过 8 个" in r.text
+
+
+def test_71_import_multiple_rejects_choice_with_nine_options(client, auth_headers):
+    data = [
+        {"title": "合法8选项", "questions": [
+            {"type": "choice", "content": "x", "options": _make_options(8), "answer": "H"},
+        ]},
+        {"title": "非法9选项", "questions": [
+            {"type": "choice", "content": "x", "options": _make_options(9), "answer": "I"},
+        ]},
+    ]
+    r = client.post("/api/question-banks/import-multiple", json=data, headers=auth_headers)
+    assert r.status_code == 200
+    results = r.json()["results"]
+    assert results[0]["success"] is True
+    assert results[1]["success"] is False
+    assert "不能超过 8 个" in results[1]["error"]
+    for b in client.get("/api/question-banks", headers=auth_headers).json():
+        if b["title"] == "合法8选项":
+            client.delete(f"/api/question-banks/{b['id']}", headers=auth_headers)
+            break
+
+
+def test_72_create_rejects_choice_with_nine_options(client, auth_headers):
+    r = client.post(f"/api/question-banks/{state.bank_id}/questions", json={
+        "type": "choice", "content": "9选项选择题",
+        "options": _make_options(9), "answer": "I",
+    }, headers=auth_headers)
+    assert r.status_code == 400
+    assert "不能超过 8 个" in r.text
+
+
+def test_73_create_rejects_multiple_with_nine_options(client, auth_headers):
+    r = client.post(f"/api/question-banks/{state.bank_id}/questions", json={
+        "type": "multiple", "content": "9选项多选题",
+        "options": _make_options(9), "answer": ["A", "I"],
+    }, headers=auth_headers)
+    assert r.status_code == 400
+    assert "不能超过 8 个" in r.text
+
+
+def test_74_update_rejects_choice_with_nine_options(client, auth_headers):
+    r = client.post(f"/api/question-banks/{state.bank_id}/questions", json={
+        "type": "choice", "content": "待更新9选项",
+        "options": _make_options(2), "answer": "A",
+    }, headers=auth_headers)
+    assert r.status_code == 201
+    qid = r.json()["id"]
+    r = client.put(f"/api/questions/{qid}", json={
+        "options": _make_options(9), "answer": "I",
+    }, headers=auth_headers)
+    assert r.status_code == 400
+    assert "不能超过 8 个" in r.text
+    client.delete(f"/api/questions/{qid}", headers=auth_headers)
+
+
+def test_75_update_rejects_multiple_with_nine_options(client, auth_headers):
+    r = client.post(f"/api/question-banks/{state.bank_id}/questions", json={
+        "type": "multiple", "content": "待更新9选项多选",
+        "options": _make_options(2), "answer": ["A", "B"],
+    }, headers=auth_headers)
+    assert r.status_code == 201
+    qid = r.json()["id"]
+    r = client.put(f"/api/questions/{qid}", json={
+        "options": _make_options(9), "answer": ["A", "I"],
+    }, headers=auth_headers)
+    assert r.status_code == 400
+    assert "不能超过 8 个" in r.text
+    client.delete(f"/api/questions/{qid}", headers=auth_headers)
+
+
+def test_76_eight_options_allowed_across_all_entrypoints(client, auth_headers):
+    """8 个选项是允许的上限，覆盖导入/批量导入/新建/更新四条路径（issue #53）"""
+    # import
+    r = client.post("/api/question-banks/import", json={
+        "title": "8选项上限-导入",
+        "questions": [
+            {"type": "choice", "content": "8选项选择题", "options": _make_options(8), "answer": "H"},
+            {"type": "multiple", "content": "8选项多选题", "options": _make_options(8), "answer": ["A", "H"]},
+        ],
+    }, headers=auth_headers)
+    assert r.status_code == 201, f"8 选项导入应成功: {r.text}"
+    bank_id = r.json()["id"]
+
+    # import-multiple
+    r = client.post("/api/question-banks/import-multiple", json=[
+        {"title": "8选项上限-批量", "questions": [
+            {"type": "choice", "content": "x", "options": _make_options(8), "answer": "H"},
+        ]},
+    ], headers=auth_headers)
+    assert r.status_code == 200
+    assert r.json()["results"][0]["success"] is True
+
+    # create
+    r = client.post(f"/api/question-banks/{bank_id}/questions", json={
+        "type": "choice", "content": "8选项新建题",
+        "options": _make_options(8), "answer": "H",
+    }, headers=auth_headers)
+    assert r.status_code == 201, f"8 选项新建应成功: {r.text}"
+    qid = r.json()["id"]
+
+    # update
+    r = client.put(f"/api/questions/{qid}", json={
+        "options": _make_options(8), "answer": "A",
+    }, headers=auth_headers)
+    assert r.status_code == 200, f"8 选项更新应成功: {r.text}"
+
+    client.delete(f"/api/question-banks/{bank_id}", headers=auth_headers)
+    for b in client.get("/api/question-banks", headers=auth_headers).json():
+        if b["title"] == "8选项上限-批量":
+            client.delete(f"/api/question-banks/{b['id']}", headers=auth_headers)
+            break
+
