@@ -1,3 +1,4 @@
+import time
 import uuid
 from datetime import UTC, datetime, timedelta
 from unittest.mock import patch
@@ -823,6 +824,21 @@ def test_29_create_question_choice(client, auth_headers):
     state._q_choice_id = data["id"]
 
 
+def test_29b_create_question_updates_bank_updated_at(client, auth_headers):
+    """新增题目后题库 updated_at 应刷新（issue #87）"""
+    r = client.get(f"/api/question-banks/{state.bank_id}", headers=auth_headers)
+    assert r.status_code == 200
+    before = datetime.fromisoformat(r.json()["updated_at"])
+    time.sleep(0.01)
+    r = client.post(f"/api/question-banks/{state.bank_id}/questions", json={
+        "type": "judge", "content": "新增题目更新时间测试", "answer": "对",
+    }, headers=auth_headers)
+    assert r.status_code == 201
+    r = client.get(f"/api/question-banks/{state.bank_id}", headers=auth_headers)
+    after = datetime.fromisoformat(r.json()["updated_at"])
+    assert after > before
+
+
 def test_30_create_question_fill(client, auth_headers):
     r = client.post(f"/api/question-banks/{state.bank_id}/questions", json={
         "type": "fill", "content": "中国的首都是____", "answer": "北京",
@@ -879,6 +895,21 @@ def test_36_edit_question_content(client, auth_headers):
     assert r.json()["content"] == "2+2=?"
 
 
+def test_36b_edit_question_updates_bank_updated_at(client, auth_headers):
+    """编辑题目后题库 updated_at 应刷新（issue #87）"""
+    r = client.get(f"/api/question-banks/{state.bank_id}", headers=auth_headers)
+    assert r.status_code == 200
+    before = datetime.fromisoformat(r.json()["updated_at"])
+    time.sleep(0.01)
+    r = client.put(f"/api/questions/{state._q_choice_id}", json={
+        "analysis": "更新时间测试",
+    }, headers=auth_headers)
+    assert r.status_code == 200
+    r = client.get(f"/api/question-banks/{state.bank_id}", headers=auth_headers)
+    after = datetime.fromisoformat(r.json()["updated_at"])
+    assert after > before
+
+
 def test_37_edit_question_switch_type(client, auth_headers):
     r = client.put(f"/api/questions/{state._q_choice_id}", json={
         "type": "fill", "content": "1+1=?", "options": None, "answer": "二",
@@ -892,6 +923,24 @@ def test_37_edit_question_switch_type(client, auth_headers):
 def test_38_edit_question_not_found(client, auth_headers):
     r = client.put("/api/questions/99999", json={"content": "x"}, headers=auth_headers)
     assert r.status_code == 404
+
+
+def test_38b_delete_question_updates_bank_updated_at(client, auth_headers):
+    """删除题目后题库 updated_at 应刷新（issue #87）"""
+    r = client.post(f"/api/question-banks/{state.bank_id}/questions", json={
+        "type": "judge", "content": "待删除以测试更新时间", "answer": "对",
+    }, headers=auth_headers)
+    assert r.status_code == 201
+    qid = r.json()["id"]
+    r = client.get(f"/api/question-banks/{state.bank_id}", headers=auth_headers)
+    assert r.status_code == 200
+    before = datetime.fromisoformat(r.json()["updated_at"])
+    time.sleep(0.01)
+    r = client.delete(f"/api/questions/{qid}", headers=auth_headers)
+    assert r.status_code == 204
+    r = client.get(f"/api/question-banks/{state.bank_id}", headers=auth_headers)
+    after = datetime.fromisoformat(r.json()["updated_at"])
+    assert after > before
 
 
 def test_38c_edit_question_blocked_by_inprogress(client, auth_headers):

@@ -6,7 +6,7 @@ from sqlalchemy.orm import Session
 
 from auth import get_current_user
 from database import get_db
-from models import ExamRecord, Question, QuestionBank, User
+from models import ExamRecord, Question, QuestionBank, User, utcnow
 from schemas import QuestionCreate, QuestionOut, QuestionUpdate
 from utils import parse_answer, parse_json_field
 
@@ -101,6 +101,7 @@ def create_question(
         analysis=data.analysis or None, sort_order=max_order + 1,
     )
     db.add(question)
+    bank.updated_at = utcnow()
     db.commit()
     db.refresh(question)
     return _question_to_out(question)
@@ -150,6 +151,7 @@ def update_question(
     question.analysis = new_analysis
     question.options = json.dumps(new_options, ensure_ascii=False) if new_options else None
     question.answer = json.dumps(new_answer, ensure_ascii=False) if isinstance(new_answer, list) else new_answer
+    question.question_bank.updated_at = utcnow()
 
     db.commit()
     db.refresh(question)
@@ -175,5 +177,6 @@ def delete_question(
     for exam in in_progress:
         if question_id in (parse_json_field(exam.question_ids) or []):
             raise HTTPException(status_code=409, detail="该题目被进行中的考试引用，请先完成或放弃考试")
+    question.question_bank.updated_at = utcnow()
     db.delete(question)
     db.commit()
