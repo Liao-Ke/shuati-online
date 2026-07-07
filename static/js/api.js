@@ -37,7 +37,9 @@ const api = {
     const data = await res.json();
     if (!res.ok) {
       if (res.status === 401) _handle401(path);
-      throw new Error(data.detail || '请求失败');
+      const err = new Error(data.detail || '请求失败');
+      err.status = res.status;
+      throw err;
     }
     return data;
   },
