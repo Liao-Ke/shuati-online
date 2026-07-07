@@ -21,7 +21,7 @@
 | 文件 | 改动 |
 |------|------|
 | `routers/auth.py` | 在 `len(data.password) < 6` 校验之后，新增 `len(data.password.encode("utf-8")) > 72` 校验，超过返回 400 |
-| `test_integration.py` | 新增 `test_01f_register_password_byte_limit`，覆盖 73 字节 ASCII → 400、72 字节 ASCII → 200、多字节超限 → 400、多字节未超限 → 200 |
+| `test_integration.py` | 新增 `test_01g_register_password_byte_limit`，覆盖 73 字节 ASCII → 400、72 字节 ASCII → 200、多字节超限 → 400、多字节未超限 → 200 |
 
 ## 影响范围
 
@@ -32,5 +32,5 @@
 ## 验证方式
 
 1. `ruff check .` — 0 错误
-2. `pytest test_integration.py -v` — 全部通过（含新增 test_01f）
+2. `pytest test_integration.py -v` — 全部通过（含新增 test_01g）
 3. 新增测试覆盖：73 字节 ASCII → 400，72 字节 ASCII → 200，多字节超限 → 400，多字节未超限 → 200

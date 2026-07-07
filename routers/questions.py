@@ -26,6 +26,8 @@ def _validate_question(type_, content, options, answer):
     if type_ == "choice":
         if not options or len(options) < 2:
             errors.append("选择题至少需要 2 个选项")
+        if options and len(options) > 8:
+            errors.append("选择题选项不能超过 8 个（A-H）")
         if options and any(not o.strip() for o in options):
             errors.append("选择题选项不能包含空白字符串")
         if not answer or not isinstance(answer, str):
@@ -46,6 +48,8 @@ def _validate_question(type_, content, options, answer):
     elif type_ == "multiple":
         if not options or len(options) < 2:
             errors.append("多选题至少需要 2 个选项")
+        if options and len(options) > 8:
+            errors.append("多选题选项不能超过 8 个（A-H）")
         if options and any(not o.strip() for o in options):
             errors.append("多选题选项不能包含空白字符串")
         if not isinstance(answer, list) or len(answer) < 1:
@@ -114,6 +118,13 @@ def update_question(
     ).first()
     if not question:
         raise HTTPException(status_code=404, detail="题目不存在")
+    # 检查是否有进行中的考试引用该题目，防止编辑后判分标准被污染（issue #90）
+    in_progress = db.query(ExamRecord).filter(
+        ExamRecord.user_id == user.id, ExamRecord.status == "in_progress",
+    ).all()
+    for exam in in_progress:
+        if question_id in (parse_json_field(exam.question_ids) or []):
+            raise HTTPException(status_code=409, detail="该题目被进行中的考试引用，请先完成或放弃考试")
 
     new_type = data.type if data.type is not None else question.type
     new_content = data.content if data.content is not None else question.content
