@@ -108,6 +108,58 @@ def test_01e_register_validation(client):
     assert r.status_code == 400
 
 
+def test_01f_rate_limit_429_returns_error_field(client):
+    """429 限流响应体包含 error 字段，前端 api.request 据此展示中文友好提示（#85）"""
+    from routers.limiter import limiter
+    # slowapi 未提供公开 reset API；测试中重置内存存储，确保限流计数不污染其他用例。
+    limiter._storage.reset()
+    try:
+        # login 接口限流 5/minute，前 5 次正常返回 401，第 6 次触发 429
+        for _ in range(5):
+            r = client.post("/api/auth/login", json={"username": "no_such_user", "password": "x"})
+            assert r.status_code == 401
+        r = client.post("/api/auth/login", json={"username": "no_such_user", "password": "x"})
+        assert r.status_code == 429
+        assert "error" in r.json(), "429 响应体必须包含 error 字段，前端据此展示限流提示"
+    finally:
+        limiter._storage.reset()
+
+
+def test_01g_register_password_byte_limit(client):
+    """bcrypt 只处理前 72 字节，注册时密码 UTF-8 字节长度不能超过 72（issue #80）"""
+    from routers.limiter import limiter
+    # slowapi 未提供公开 reset API；测试中重置内存存储，避免注册限流影响边界用例。
+    limiter._storage.reset()
+    suffix = uuid.uuid4().hex[:8]
+    try:
+        # 73 字节 ASCII 密码 → 400
+        r = client.post("/api/auth/register", json={
+            "username": f"pwd73_{suffix}", "password": "a" * 73,
+        })
+        assert r.status_code == 400
+        assert "72" in r.json()["detail"]
+
+        # 72 字节 ASCII 密码 → 正常注册
+        r = client.post("/api/auth/register", json={
+            "username": f"pwd72_{suffix}", "password": "a" * 72,
+        })
+        assert r.status_code == 200
+
+        # 多字节字符密码超出 72 字节 → 400（每个中文字符 3 字节，25 个 = 75 字节）
+        r = client.post("/api/auth/register", json={
+            "username": f"pwdmb_{suffix}", "password": "密" * 25,
+        })
+        assert r.status_code == 400
+
+        # 多字节字符密码未超 72 字节 → 正常注册（24 个中文 = 72 字节）
+        r = client.post("/api/auth/register", json={
+            "username": f"pwdmb2_{suffix}", "password": "密" * 24,
+        })
+        assert r.status_code == 200
+    finally:
+        limiter._storage.reset()
+
+
 def test_02_import_bank(client, auth_headers):
     r = client.post("/api/question-banks/import", json=BANK_DATA, headers=auth_headers)
     assert r.status_code == 201, f"导入失败: {r.text}"
@@ -323,6 +375,56 @@ def test_07_wrong_answers(client, auth_headers):
     r = client.get("/api/wrong-answers", headers=auth_headers)
     assert r.status_code == 200
     assert len(r.json()) == 2
+    # #54: 错题响应应返回 bank_id，前端据此区分同名题库
+    for item in r.json():
+        assert "bank_id" in item, "错题响应缺少 bank_id 字段"
+
+
+def test_07f_wrong_answers_same_title_distinct_bank_id(client, auth_headers):
+    """同名题库应通过 bank_id 区分，bank_title 相同但 bank_id 不同 (#54)"""
+    # 再导入一个同名题库（与 state.bank_id 的题库同名 "测试题库"），只含 1 道选择题
+    same_title_data = {
+        "title": "测试题库",
+        "description": "同名题库二",
+        "questions": [
+            {"type": "choice", "chapter": "基础", "content": "2+2=?", "options": ["3", "4", "5", "6"], "answer": "B"},
+        ],
+    }
+    r = client.post("/api/question-banks/import", json=same_title_data, headers=auth_headers)
+    assert r.status_code in (200, 201), f"导入同名题库失败: {r.text}"
+    second_bank_id = r.json()["id"]
+    assert second_bank_id != state.bank_id, "同名题库应有不同 ID"
+
+    # 用第二个题库单独开考并答错，产生错题
+    r = client.post("/api/exam/start", json={
+        "bank_ids": [second_bank_id],
+        "mode": "sequential",
+        "question_count": 1,
+        "timer_mode": "per_question",
+    }, headers=auth_headers)
+    assert r.status_code == 200, f"开始考试失败: {r.text}"
+    exam_id = r.json()["exam_id"]
+    r = client.get(f"/api/exam/{exam_id}/current", headers=auth_headers)
+    q = r.json()["question"]
+    r = client.post(f"/api/exam/{exam_id}/answer", json={
+        "exam_id": exam_id, "question_id": q["id"], "user_answer": "A", "time_spent_seconds": 3,
+    }, headers=auth_headers)
+    assert r.status_code == 200
+    client.post(f"/api/exam/{exam_id}/finish", json={}, headers=auth_headers)
+
+    # 错题本应能通过 bank_id 区分两个同名题库
+    r = client.get("/api/wrong-answers", headers=auth_headers)
+    wrongs = r.json()
+    same_title = [w for w in wrongs if w.get("bank_title") == "测试题库"]
+    assert len(same_title) >= 1
+    bank_ids = {w["bank_id"] for w in same_title}
+    assert state.bank_id in bank_ids, "原同名题库的错题应保留来源 bank_id"
+    assert second_bank_id in bank_ids, "第二个同名题库的错题应能通过 bank_id 识别来源"
+    assert len(bank_ids) >= 2, "同名题库不应再被 bank_title 混成一个来源"
+    assert all(w["bank_id"] for w in same_title), "bank_id 不应为空"
+
+    # 清理第二个题库，避免影响后续 test_14_verify_delete 的 0 题库断言
+    client.delete(f"/api/question-banks/{second_bank_id}", headers=auth_headers)
 
 
 # ── Test: 错题练习 ──
@@ -839,6 +941,38 @@ def test_38b_delete_question_updates_bank_updated_at(client, auth_headers):
     r = client.get(f"/api/question-banks/{state.bank_id}", headers=auth_headers)
     after = datetime.fromisoformat(r.json()["updated_at"])
     assert after > before
+
+
+def test_38c_edit_question_blocked_by_inprogress(client, auth_headers):
+    """进行中考试引用的题目不可编辑，考试完成后可编辑（issue #90）"""
+    import uuid
+    suffix = uuid.uuid4().hex[:8]
+    r = client.post("/api/question-banks/import", json={
+        "title": f"编辑检查_{suffix}", "description": "",
+        "questions": [
+            {"type": "judge", "content": "编辑保护测试", "answer": "对"},
+        ],
+    }, headers=auth_headers)
+    test_bank_id = r.json()["id"]
+    r = client.post("/api/exam/start", json={
+        "bank_ids": [test_bank_id], "mode": "sequential",
+    }, headers=auth_headers)
+    exam_id = r.json()["exam_id"]
+    r = client.get(f"/api/exam/{exam_id}/current", headers=auth_headers)
+    qid = r.json()["question"]["id"]
+    # 进行中考试引用的题目应拒绝编辑
+    r = client.put(f"/api/questions/{qid}", json={"content": "被篡改的内容"}, headers=auth_headers)
+    assert r.status_code == 409, f"进行中考试引用的题目应返回 409: {r.text}"
+    r = client.put(f"/api/questions/{qid}", json={"answer": "错"}, headers=auth_headers)
+    assert r.status_code == 409, f"进行中考试引用的题目修改答案应返回 409: {r.text}"
+    # 完成考试后应可编辑
+    r = client.post(f"/api/exam/{exam_id}/finish", json={}, headers=auth_headers)
+    assert r.status_code == 200
+    r = client.put(f"/api/questions/{qid}", json={"content": "考试后编辑"}, headers=auth_headers)
+    assert r.status_code == 200, f"考试完成后应可编辑题目: {r.text}"
+    assert r.json()["content"] == "考试后编辑"
+    # 清理
+    client.delete(f"/api/question-banks/{test_bank_id}", headers=auth_headers)
 
 
 def test_39_delete_question(client, auth_headers):
@@ -1384,3 +1518,271 @@ def test_68_submit_answer_allows_null_answer(client, auth_headers):
         "user_answer": None, "time_spent_seconds": 3,
     }, headers=auth_headers)
     assert r.status_code == 200
+
+
+# ── Test: 题型空列表过滤（issue #77）──
+
+
+def test_69b_exam_start_empty_types_returns_400(client, auth_headers):
+    """types=[] 应返回 400（空集合匹配不到任何题型），而非泄漏全部题型"""
+    r = client.post("/api/exam/start", json={
+        "bank_ids": [state.bank_id], "mode": "sequential",
+        "types": [],
+        "choice_timeout": 30, "judge_fill_timeout": 60,
+    }, headers=auth_headers)
+    assert r.status_code == 400
+    assert "没有符合条件的题目" in r.text
+
+
+def test_70b_review_empty_types_returns_empty(client, auth_headers):
+    """types=[] 应返回空列表，而非泄漏全部题型"""
+    r = client.post("/api/review/questions", json={
+        "bank_ids": [state.bank_id],
+        "types": [],
+    }, headers=auth_headers)
+    assert r.status_code == 200
+    assert r.json() == []
+
+
+def test_71b_review_null_types_returns_all(client, auth_headers):
+    """types 未传（None）应保持向后兼容，返回全部题型"""
+    r = client.post("/api/review/questions", json={
+        "bank_ids": [state.bank_id],
+    }, headers=auth_headers)
+    assert r.status_code == 200
+    assert len(r.json()) >= 1
+
+
+# ── Test: 章节空列表过滤（issue #91）──
+
+
+def test_69_exam_start_empty_chapters_returns_400(client, auth_headers):
+    """chapters=[] 应返回 400（空集合匹配不到任何题目），而非泄漏全部章节"""
+    r = client.post("/api/exam/start", json={
+        "bank_ids": [state.bank_id], "mode": "sequential",
+        "chapters": [],
+        "choice_timeout": 30, "judge_fill_timeout": 60,
+    }, headers=auth_headers)
+    assert r.status_code == 400
+    assert "没有符合条件的题目" in r.text
+
+
+def test_70_review_empty_chapters_returns_empty(client, auth_headers):
+    """chapters=[] 应返回空列表，而非泄漏全部章节"""
+    r = client.post("/api/review/questions", json={
+        "bank_ids": [state.bank_id],
+        "chapters": [],
+    }, headers=auth_headers)
+    assert r.status_code == 200
+    assert r.json() == []
+
+
+def test_71_review_null_chapters_returns_all(client, auth_headers):
+    """chapters 未传（None）应保持向后兼容，返回全部章节题目"""
+    r = client.post("/api/review/questions", json={
+        "bank_ids": [state.bank_id],
+    }, headers=auth_headers)
+    assert r.status_code == 200
+    assert len(r.json()) >= 1
+
+
+# ── Test: 章节名含双引号时筛选不截断（issue #75）──
+
+
+QUOTE_CHAPTER_BANK = {
+    "title": "双引号章节测试",
+    "questions": [
+        {"type": "choice", "chapter": "第\"一\"章", "content": "1+1=?", "options": ["1", "2", "3", "4"], "answer": "B"},
+        {"type": "fill", "chapter": "第\"一\"章", "content": "中国的首都是____", "answer": "北京"},
+        {"type": "judge", "chapter": "普通章节", "content": "地球是圆的", "answer": "对"},
+    ],
+}
+
+
+def test_77_quote_chapter_import(client, auth_headers):
+    r = client.post("/api/question-banks/import", json=QUOTE_CHAPTER_BANK, headers=auth_headers)
+    assert r.status_code == 201, f"导入失败: {r.text}"
+    state._quote_bank_id = r.json()["id"]
+
+
+def test_78_quote_chapter_review_chapters(client, auth_headers):
+    r = client.post("/api/review/chapters", json={
+        "bank_ids": [state._quote_bank_id],
+    }, headers=auth_headers)
+    assert r.status_code == 200
+    chapters = r.json()
+    assert "第\"一\"章" in chapters, f"章节列表应包含完整的双引号章节名: {chapters}"
+
+
+def test_79_quote_chapter_exam_start_filter(client, auth_headers):
+    r = client.post("/api/exam/start", json={
+        "bank_ids": [state._quote_bank_id], "mode": "sequential",
+        "chapters": ["第\"一\"章"],
+    }, headers=auth_headers)
+    assert r.status_code == 200
+    data = r.json()
+    assert data["total_count"] == 2, f"按双引号章节筛选应返回 2 题，实际 {data['total_count']}"
+    exam_id = data["exam_id"]
+    r = client.get(f"/api/exam/{exam_id}/current", headers=auth_headers)
+    assert r.status_code == 200
+    assert r.json()["question"]["chapter"] == "第\"一\"章"
+    client.post(f"/api/exam/{exam_id}/finish", json={}, headers=auth_headers)
+
+
+def test_80_quote_chapter_review_questions_filter(client, auth_headers):
+    r = client.post("/api/review/questions", json={
+        "bank_ids": [state._quote_bank_id],
+        "chapters": ["第\"一\"章"],
+    }, headers=auth_headers)
+    assert r.status_code == 200
+    questions = r.json()
+    assert len(questions) == 2, f"背题模式按双引号章节筛选应返回 2 题，实际 {len(questions)}"
+    for q in questions:
+        assert q["chapter"] == "第\"一\"章"
+
+
+def test_81_quote_chapter_cleanup(client, auth_headers):
+    client.delete(f"/api/question-banks/{state._quote_bank_id}", headers=auth_headers)
+
+
+# ── Test: 选择题/多选题选项上限 8 个（issue #53）──
+
+
+def _make_options(count: int) -> list[str]:
+    return [str(i) for i in range(1, count + 1)]
+
+
+def test_69_import_rejects_choice_with_nine_options(client, auth_headers):
+    data = {
+        "title": "9选项选择题",
+        "questions": [
+            {"type": "choice", "content": "x", "options": _make_options(9), "answer": "I"},
+        ],
+    }
+    r = client.post("/api/question-banks/import", json=data, headers=auth_headers)
+    assert r.status_code == 400
+    assert "不能超过 8 个" in r.text
+
+
+def test_70_import_rejects_multiple_with_nine_options(client, auth_headers):
+    data = {
+        "title": "9选项多选题",
+        "questions": [
+            {"type": "multiple", "content": "x", "options": _make_options(9), "answer": ["A", "I"]},
+        ],
+    }
+    r = client.post("/api/question-banks/import", json=data, headers=auth_headers)
+    assert r.status_code == 400
+    assert "不能超过 8 个" in r.text
+
+
+def test_71_import_multiple_rejects_choice_with_nine_options(client, auth_headers):
+    data = [
+        {"title": "合法8选项", "questions": [
+            {"type": "choice", "content": "x", "options": _make_options(8), "answer": "H"},
+        ]},
+        {"title": "非法9选项", "questions": [
+            {"type": "choice", "content": "x", "options": _make_options(9), "answer": "I"},
+        ]},
+    ]
+    r = client.post("/api/question-banks/import-multiple", json=data, headers=auth_headers)
+    assert r.status_code == 200
+    results = r.json()["results"]
+    assert results[0]["success"] is True
+    assert results[1]["success"] is False
+    assert "不能超过 8 个" in results[1]["error"]
+    for b in client.get("/api/question-banks", headers=auth_headers).json():
+        if b["title"] == "合法8选项":
+            client.delete(f"/api/question-banks/{b['id']}", headers=auth_headers)
+            break
+
+
+def test_72_create_rejects_choice_with_nine_options(client, auth_headers):
+    r = client.post(f"/api/question-banks/{state.bank_id}/questions", json={
+        "type": "choice", "content": "9选项选择题",
+        "options": _make_options(9), "answer": "I",
+    }, headers=auth_headers)
+    assert r.status_code == 400
+    assert "不能超过 8 个" in r.text
+
+
+def test_73_create_rejects_multiple_with_nine_options(client, auth_headers):
+    r = client.post(f"/api/question-banks/{state.bank_id}/questions", json={
+        "type": "multiple", "content": "9选项多选题",
+        "options": _make_options(9), "answer": ["A", "I"],
+    }, headers=auth_headers)
+    assert r.status_code == 400
+    assert "不能超过 8 个" in r.text
+
+
+def test_74_update_rejects_choice_with_nine_options(client, auth_headers):
+    r = client.post(f"/api/question-banks/{state.bank_id}/questions", json={
+        "type": "choice", "content": "待更新9选项",
+        "options": _make_options(2), "answer": "A",
+    }, headers=auth_headers)
+    assert r.status_code == 201
+    qid = r.json()["id"]
+    r = client.put(f"/api/questions/{qid}", json={
+        "options": _make_options(9), "answer": "I",
+    }, headers=auth_headers)
+    assert r.status_code == 400
+    assert "不能超过 8 个" in r.text
+    client.delete(f"/api/questions/{qid}", headers=auth_headers)
+
+
+def test_75_update_rejects_multiple_with_nine_options(client, auth_headers):
+    r = client.post(f"/api/question-banks/{state.bank_id}/questions", json={
+        "type": "multiple", "content": "待更新9选项多选",
+        "options": _make_options(2), "answer": ["A", "B"],
+    }, headers=auth_headers)
+    assert r.status_code == 201
+    qid = r.json()["id"]
+    r = client.put(f"/api/questions/{qid}", json={
+        "options": _make_options(9), "answer": ["A", "I"],
+    }, headers=auth_headers)
+    assert r.status_code == 400
+    assert "不能超过 8 个" in r.text
+    client.delete(f"/api/questions/{qid}", headers=auth_headers)
+
+
+def test_76_eight_options_allowed_across_all_entrypoints(client, auth_headers):
+    """8 个选项是允许的上限，覆盖导入/批量导入/新建/更新四条路径（issue #53）"""
+    # import
+    r = client.post("/api/question-banks/import", json={
+        "title": "8选项上限-导入",
+        "questions": [
+            {"type": "choice", "content": "8选项选择题", "options": _make_options(8), "answer": "H"},
+            {"type": "multiple", "content": "8选项多选题", "options": _make_options(8), "answer": ["A", "H"]},
+        ],
+    }, headers=auth_headers)
+    assert r.status_code == 201, f"8 选项导入应成功: {r.text}"
+    bank_id = r.json()["id"]
+
+    # import-multiple
+    r = client.post("/api/question-banks/import-multiple", json=[
+        {"title": "8选项上限-批量", "questions": [
+            {"type": "choice", "content": "x", "options": _make_options(8), "answer": "H"},
+        ]},
+    ], headers=auth_headers)
+    assert r.status_code == 200
+    assert r.json()["results"][0]["success"] is True
+
+    # create
+    r = client.post(f"/api/question-banks/{bank_id}/questions", json={
+        "type": "choice", "content": "8选项新建题",
+        "options": _make_options(8), "answer": "H",
+    }, headers=auth_headers)
+    assert r.status_code == 201, f"8 选项新建应成功: {r.text}"
+    qid = r.json()["id"]
+
+    # update
+    r = client.put(f"/api/questions/{qid}", json={
+        "options": _make_options(8), "answer": "A",
+    }, headers=auth_headers)
+    assert r.status_code == 200, f"8 选项更新应成功: {r.text}"
+
+    client.delete(f"/api/question-banks/{bank_id}", headers=auth_headers)
+    for b in client.get("/api/question-banks", headers=auth_headers).json():
+        if b["title"] == "8选项上限-批量":
+            client.delete(f"/api/question-banks/{b['id']}", headers=auth_headers)
+            break

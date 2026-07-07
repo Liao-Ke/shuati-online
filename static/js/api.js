@@ -1,4 +1,15 @@
 const API_BASE = '/api';
+const AUTH_PATHS = ['/auth/login', '/auth/register', '/auth/me'];
+
+function _isAuthPath(path) {
+  return AUTH_PATHS.some(p => path === p || path.startsWith(p + '?'));
+}
+
+function _handle401(path) {
+  if (_isAuthPath(path)) return;
+  api.setToken(null);
+  window.dispatchEvent(new CustomEvent('auth-expired'));
+}
 
 const api = {
   token: localStorage.getItem('token'),
@@ -25,7 +36,13 @@ const api = {
     if (res.status === 204) return null;
     const data = await res.json();
     if (!res.ok) {
-      throw new Error(data.detail || '请求失败');
+      if (res.status === 401) _handle401(path);
+      const msg = res.status === 429
+        ? '请求过于频繁，请稍后重试'
+        : (data.detail || data.error || '请求失败');
+      const err = new Error(msg);
+      err.status = res.status;
+      throw err;
     }
     return data;
   },
@@ -71,6 +88,7 @@ const api = {
     if (this.token) headers['Authorization'] = `Bearer ${this.token}`;
     const res = await fetch(`${API_BASE}/question-banks/${bankId}/export`, { headers });
     if (!res.ok) {
+      if (res.status === 401) _handle401(`/question-banks/${bankId}/export`);
       const err = await res.json().catch(() => ({}));
       throw new Error(err.detail || '导出失败');
     }

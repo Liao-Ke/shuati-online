@@ -18,7 +18,7 @@
 
 ## 验证
 
-- 本地执行 `pytest test_integration.py -v`，100 个测试全部通过。
+- 远端 CI 执行集成测试通过；本地可用时执行 `pytest test_integration.py -v` 覆盖新增回归用例。
 - 手动验证：创建题库 → 新增/编辑/删除题目 → 题库详情 `updated_at` 变化，列表排序随之更新。
 
 ## 已知限制
