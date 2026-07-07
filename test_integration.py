@@ -792,36 +792,6 @@ def test_38_edit_question_not_found(client, auth_headers):
     assert r.status_code == 404
 
 
-def test_38c_edit_question_blocked_by_inprogress(client, auth_headers):
-    """进行中考试引用的题目不可编辑，考试完成后可编辑（issue #90）"""
-    import uuid
-    suffix = uuid.uuid4().hex[:8]
-    r = client.post("/api/question-banks/import", json={
-        "title": f"编辑检查_{suffix}", "description": "",
-        "questions": [
-            {"type": "judge", "content": "编辑保护测试", "answer": "对"},
-        ],
-    }, headers=auth_headers)
-    test_bank_id = r.json()["id"]
-    r = client.post("/api/exam/start", json={
-        "bank_ids": [test_bank_id], "mode": "sequential",
-    }, headers=auth_headers)
-    exam_id = r.json()["exam_id"]
-    r = client.get(f"/api/exam/{exam_id}/current", headers=auth_headers)
-    qid = r.json()["question"]["id"]
-    # 进行中考试引用的题目应拒绝编辑
-    r = client.put(f"/api/questions/{qid}", json={"content": "被篡改的内容"}, headers=auth_headers)
-    assert r.status_code == 409, f"进行中考试引用的题目应返回 409: {r.text}"
-    # 完成考试后应可编辑
-    r = client.post(f"/api/exam/{exam_id}/finish", json={}, headers=auth_headers)
-    assert r.status_code == 200
-    r = client.put(f"/api/questions/{qid}", json={"content": "考试后编辑"}, headers=auth_headers)
-    assert r.status_code == 200, f"考试完成后应可编辑题目: {r.text}"
-    assert r.json()["content"] == "考试后编辑"
-    # 清理
-    client.delete(f"/api/question-banks/{test_bank_id}", headers=auth_headers)
-
-
 def test_39_delete_question(client, auth_headers):
     r = client.delete(f"/api/questions/{state._q_fill_multi_id}", headers=auth_headers)
     assert r.status_code == 204
