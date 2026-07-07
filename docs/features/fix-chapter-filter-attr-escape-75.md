@@ -30,13 +30,15 @@
 |------|------|
 | `static/js/app.js` | `renderChapterCheckboxes()`、`renderExamChapterCheckboxes()` 改用 DOM API |
 | `test_integration.py` | 新增 test_77~test_81，覆盖双引号章节名的导入、章节列表、答题筛选、背题筛选 |
+| `tests/frontend/chapter_filters.test.js` | 覆盖前端 DOM 渲染时 checkbox value 不因双引号截断 |
 
 ## 验证
 
 - `node --check static/js/app.js` 语法通过
+- `node --test tests/frontend/*.test.js` 前端辅助函数测试通过
 - `ruff check .` 0 错误
-- `pytest test_integration.py -v` 全部 110 条通过（含 5 条新增）
+- `pytest test_integration.py -v` 全部 102 条通过（含 5 条新增，PR 原验证记录）
 
 ## 已知限制
 
-- 前端 DOM 行为未通过浏览器自动化验证（无 Playwright 集成），通过后端契约测试固化「双引号章节名是合法值」的契约
+- 未引入浏览器端到端测试；前端 DOM 行为通过 Node DOM stub 覆盖，后端契约测试固化「双引号章节名是合法值」
