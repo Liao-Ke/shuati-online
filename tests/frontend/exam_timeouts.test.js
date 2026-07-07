@@ -38,10 +38,16 @@ function loadHelpers(overrides = {}) {
       return this.elements.get(id);
     },
   };
+  const removedListeners = [];
   const context = {
     console,
     location: { hash: '' },
-    window: { addEventListener() {}, removeEventListener() {} },
+    window: {
+      addEventListener() {},
+      removeEventListener(event, handler) { removedListeners.push({ event, handler }); },
+    },
+    clearInterval() {},
+    clearTimeout() {},
     document: documentStub,
     api: overrides.api || {},
     sessionStorage: {
@@ -58,8 +64,51 @@ __exports.isWrongPracticeBankChecked = isWrongPracticeBankChecked;
 __exports.toggleBankSelect = toggleBankSelect;
 __exports.toggleReviewBankSelect = toggleReviewBankSelect;
 __exports.filterRetryImportFiles = filterRetryImportFiles;
+__exports.resetSessionState = resetSessionState;
+__exports.primeSessionState = () => {
+  examId = 42;
+  examTotalCount = 3;
+  selectedAnswer = 'A';
+  selectedMultiAnswers = ['A', 'B'];
+  examTimerInterval = 1;
+  examElapsedInterval = 2;
+  examScrollTimer = 3;
+  examTimeoutSeconds = 99;
+  examCurrentIndex = 2;
+  examProgress = { current: 2 };
+  examPaused = true;
+  examPauseRemaining = 8;
+  examFullPreview = true;
+  examTimerMode = 'elapsed';
+  examStartedAt = '2026-01-01T00:00:00.000Z';
+  examElapsedOffset = 12;
+  reviewFilter = { status: 'reviewing' };
+  reviewQuestions = [{ id: 1 }];
+  state.questionStartTime = 123;
+};
+__exports.snapshotSessionState = () => ({
+  examId,
+  examTotalCount,
+  selectedAnswer,
+  selectedMultiAnswers,
+  examTimerInterval,
+  examElapsedInterval,
+  examScrollTimer,
+  examTimeoutSeconds,
+  examCurrentIndex,
+  examProgress,
+  examPaused,
+  examPauseRemaining,
+  examFullPreview,
+  examTimerMode,
+  examStartedAt,
+  examElapsedOffset,
+  reviewFilter,
+  reviewQuestions,
+  questionStartTime: state.questionStartTime,
+});
 __exports.router = router;`, context);
-  return { ...context.__exports, sessionStorage: context.sessionStorage, document: context.document };
+  return { ...context.__exports, sessionStorage: context.sessionStorage, document: context.document, removedListeners };
 }
 
 function makeCard(selector, checked = false, questionCount = '3') {
@@ -100,6 +149,39 @@ test('exam timeout helpers fall back to defaults when storage is missing or brok
   assert.equal(getExamTimeoutSeconds('choice'), 30);
   assert.equal(getExamTimeoutSeconds('multiple'), 45);
   assert.equal(getExamTimeoutSeconds('judge'), 60);
+});
+
+test('reset session state clears exam and review browser state', () => {
+  const { resetSessionState, primeSessionState, snapshotSessionState, sessionStorage, removedListeners } = loadHelpers();
+  const keys = ['activeExamId', 'examCurrentIndex', 'examMode', 'examTimerMode', 'examStartedAt', 'examElapsedOffset', 'examTimeouts', 'reviewFilter'];
+  keys.forEach((key) => sessionStorage.setItem(key, `stale-${key}`));
+
+  primeSessionState();
+  resetSessionState();
+
+  keys.forEach((key) => assert.equal(sessionStorage.getItem(key), null, `${key} should be cleared`));
+  assert.equal(removedListeners.some(({ event }) => event === 'scroll'), true);
+  assert.deepEqual(JSON.parse(JSON.stringify(snapshotSessionState())), {
+    examId: null,
+    examTotalCount: 0,
+    selectedAnswer: null,
+    selectedMultiAnswers: [],
+    examTimerInterval: null,
+    examElapsedInterval: null,
+    examScrollTimer: null,
+    examTimeoutSeconds: 30,
+    examCurrentIndex: 0,
+    examProgress: null,
+    examPaused: false,
+    examPauseRemaining: 0,
+    examFullPreview: false,
+    examTimerMode: 'per_question',
+    examStartedAt: null,
+    examElapsedOffset: 0,
+    reviewFilter: null,
+    reviewQuestions: [],
+    questionStartTime: null,
+  });
 });
 
 
