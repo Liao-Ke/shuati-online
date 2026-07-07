@@ -124,6 +124,41 @@ def test_01f_rate_limit_429_returns_error_field(client):
         limiter._storage.reset()
 
 
+def test_01g_register_password_byte_limit(client):
+    """bcrypt 只处理前 72 字节，注册时密码 UTF-8 字节长度不能超过 72（issue #80）"""
+    from routers.limiter import limiter
+    # slowapi 未提供公开 reset API；测试中重置内存存储，避免注册限流影响边界用例。
+    limiter._storage.reset()
+    suffix = uuid.uuid4().hex[:8]
+    try:
+        # 73 字节 ASCII 密码 → 400
+        r = client.post("/api/auth/register", json={
+            "username": f"pwd73_{suffix}", "password": "a" * 73,
+        })
+        assert r.status_code == 400
+        assert "72" in r.json()["detail"]
+
+        # 72 字节 ASCII 密码 → 正常注册
+        r = client.post("/api/auth/register", json={
+            "username": f"pwd72_{suffix}", "password": "a" * 72,
+        })
+        assert r.status_code == 200
+
+        # 多字节字符密码超出 72 字节 → 400（每个中文字符 3 字节，25 个 = 75 字节）
+        r = client.post("/api/auth/register", json={
+            "username": f"pwdmb_{suffix}", "password": "密" * 25,
+        })
+        assert r.status_code == 400
+
+        # 多字节字符密码未超 72 字节 → 正常注册（24 个中文 = 72 字节）
+        r = client.post("/api/auth/register", json={
+            "username": f"pwdmb2_{suffix}", "password": "密" * 24,
+        })
+        assert r.status_code == 200
+    finally:
+        limiter._storage.reset()
+
+
 def test_02_import_bank(client, auth_headers):
     r = client.post("/api/question-banks/import", json=BANK_DATA, headers=auth_headers)
     assert r.status_code == 201, f"导入失败: {r.text}"
@@ -1702,4 +1737,3 @@ def test_76_eight_options_allowed_across_all_entrypoints(client, auth_headers):
         if b["title"] == "8选项上限-批量":
             client.delete(f"/api/question-banks/{b['id']}", headers=auth_headers)
             break
-
