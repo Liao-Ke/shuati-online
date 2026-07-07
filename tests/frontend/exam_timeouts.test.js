@@ -40,7 +40,8 @@ function loadHelpers() {
 __exports.formatBankDisplayName = formatBankDisplayName;
 __exports.isWrongPracticeBankChecked = isWrongPracticeBankChecked;
 __exports.toggleBankSelect = toggleBankSelect;
-__exports.toggleReviewBankSelect = toggleReviewBankSelect;`, context);
+__exports.toggleReviewBankSelect = toggleReviewBankSelect;
+__exports.filterRetryImportFiles = filterRetryImportFiles;`, context);
   return { ...context.__exports, sessionStorage: context.sessionStorage, document: context.document };
 }
 
@@ -135,4 +136,17 @@ test('review bank card selection stays in sync when clicking checkbox or card bo
   assert.equal(cb.checked, false);
   assert.equal(card.classList.contains('selected'), false);
   assert.equal(document.getElementById('review-selected-count').textContent, '已选 0 个题库');
+});
+
+
+test('batch import retry keeps only failed or unknown-result items', () => {
+  const { filterRetryImportFiles } = loadHelpers();
+  const validA = { title: '合法题库 A' };
+  const invalidB = { title: '失败题库 B' };
+  const unknownC = { title: '未知结果题库 C' };
+
+  assert.deepEqual(
+    filterRetryImportFiles([validA, invalidB, unknownC], [{ success: true }, { success: false }]),
+    [invalidB, unknownC],
+  );
 });
