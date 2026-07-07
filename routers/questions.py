@@ -114,6 +114,13 @@ def update_question(
     ).first()
     if not question:
         raise HTTPException(status_code=404, detail="题目不存在")
+    # 检查是否有进行中的考试引用该题目，防止编辑后判分标准被污染（issue #90）
+    in_progress = db.query(ExamRecord).filter(
+        ExamRecord.user_id == user.id, ExamRecord.status == "in_progress",
+    ).all()
+    for exam in in_progress:
+        if question_id in (parse_json_field(exam.question_ids) or []):
+            raise HTTPException(status_code=409, detail="该题目被进行中的考试引用，请先完成或放弃考试")
 
     new_type = data.type if data.type is not None else question.type
     new_content = data.content if data.content is not None else question.content
