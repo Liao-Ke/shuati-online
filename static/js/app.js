@@ -1849,6 +1849,10 @@ function goToNext() {
 
 let importFileList = [];
 
+function filterRetryImportFiles(files, results) {
+  return files.filter((_, i) => !results[i]?.success);
+}
+
 function showImportModal() {
   importFileList = [];
   document.getElementById('import-file').value = '';
@@ -1926,7 +1930,7 @@ async function doImport() {
         router.resolve();
       }, 800);
     } else {
-      importFileList = importFileList.filter((_, i) => !res.results[i]?.success);
+      importFileList = filterRetryImportFiles(importFileList, res.results);
       btn.disabled = false; btn.innerHTML = '重试失败项';
     }
   } catch (err) {
