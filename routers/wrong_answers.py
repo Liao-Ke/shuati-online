@@ -97,6 +97,7 @@ def list_wrong(user: User = Depends(get_current_user), db: Session = Depends(get
         user_answer = parse_json_field(latest_record.user_answer) if latest_record else None
         result.append({
             "question_id": q.id,
+            "bank_id": q.bank_id,
             "bank_title": q.question_bank.title if q.question_bank else "",
             "type": q.type,
             "chapter": q.chapter,
