@@ -54,3 +54,31 @@ test('api request still handles non-auth 401 by clearing token', async () => {
   assert.equal(storage.get('token'), undefined);
   assert.deepEqual(events, ['auth-expired']);
 });
+
+test('api request maps 429 rate limit responses to friendly message', async () => {
+  const { api, events } = loadApi(async () => ({
+    ok: false,
+    status: 429,
+    async json() { return { error: 'Rate limit exceeded: 5 per 1 minute' }; },
+  }));
+
+  await assert.rejects(
+    () => api.login('u', 'p'),
+    (err) => {
+      assert.equal(err.message, '请求过于频繁，请稍后重试');
+      assert.equal(err.status, 429);
+      return true;
+    },
+  );
+  assert.deepEqual(events, []);
+});
+
+test('api request falls back to error field for non-429 responses', async () => {
+  const { api } = loadApi(async () => ({
+    ok: false,
+    status: 400,
+    async json() { return { error: '自定义错误' }; },
+  }));
+
+  await assert.rejects(() => api.getBanks(), /自定义错误/);
+});

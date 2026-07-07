@@ -37,7 +37,10 @@ const api = {
     const data = await res.json();
     if (!res.ok) {
       if (res.status === 401) _handle401(path);
-      const err = new Error(data.detail || '请求失败');
+      const msg = res.status === 429
+        ? '请求过于频繁，请稍后重试'
+        : (data.detail || data.error || '请求失败');
+      const err = new Error(msg);
       err.status = res.status;
       throw err;
     }
