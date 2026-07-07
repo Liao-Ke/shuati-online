@@ -869,9 +869,18 @@ function renderChapterCheckboxes(chapters) {
     if (countEl) countEl.textContent = '';
     return;
   }
-  list.innerHTML = chapters.map(c =>
-    `<label class="d-block chapter-label"><input type="checkbox" class="form-check-input me-1 review-chapter-filter" value="${escHtml(c)}"> ${escHtml(c)}</label>`
-  ).join('');
+  list.innerHTML = '';
+  chapters.forEach(c => {
+    const label = document.createElement('label');
+    label.className = 'd-block chapter-label';
+    const input = document.createElement('input');
+    input.type = 'checkbox';
+    input.className = 'form-check-input me-1 review-chapter-filter';
+    input.value = c;
+    label.appendChild(input);
+    label.appendChild(document.createTextNode(' ' + c));
+    list.appendChild(label);
+  });
   updateChapterCount();
 }
 
@@ -922,9 +931,18 @@ function renderExamChapterCheckboxes(chapters) {
     if (countEl) countEl.textContent = '';
     return;
   }
-  list.innerHTML = chapters.map(c =>
-    `<label class="d-block chapter-label"><input type="checkbox" class="form-check-input me-1 exam-chapter-filter" value="${escHtml(c)}"> ${escHtml(c)}</label>`
-  ).join('');
+  list.innerHTML = '';
+  chapters.forEach(c => {
+    const label = document.createElement('label');
+    label.className = 'd-block chapter-label';
+    const input = document.createElement('input');
+    input.type = 'checkbox';
+    input.className = 'form-check-input me-1 exam-chapter-filter';
+    input.value = c;
+    label.appendChild(input);
+    label.appendChild(document.createTextNode(' ' + c));
+    list.appendChild(label);
+  });
   updateExamChapterCount();
 }
 
