@@ -862,6 +862,8 @@ def test_38c_edit_question_blocked_by_inprogress(client, auth_headers):
     # 进行中考试引用的题目应拒绝编辑
     r = client.put(f"/api/questions/{qid}", json={"content": "被篡改的内容"}, headers=auth_headers)
     assert r.status_code == 409, f"进行中考试引用的题目应返回 409: {r.text}"
+    r = client.put(f"/api/questions/{qid}", json={"answer": "错"}, headers=auth_headers)
+    assert r.status_code == 409, f"进行中考试引用的题目修改答案应返回 409: {r.text}"
     # 完成考试后应可编辑
     r = client.post(f"/api/exam/{exam_id}/finish", json={}, headers=auth_headers)
     assert r.status_code == 200
