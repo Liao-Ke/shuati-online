@@ -36,6 +36,28 @@ const router = new Router();
 const $ = (sel) => document.querySelector(sel);
 const $$ = (sel) => document.querySelectorAll(sel);
 
+window.addEventListener('auth-expired', () => {
+  state.user = null;
+  router.navigate('/login');
+});
+
+function saveExamTimeouts(choice, multi, fill) {
+  sessionStorage.setItem('examTimeouts', JSON.stringify({ choice, multi, fill }));
+}
+
+function getExamTimeoutSeconds(type) {
+  let timeouts = {};
+  try {
+    timeouts = JSON.parse(sessionStorage.getItem('examTimeouts') || '{}');
+  } catch {
+    // ponytail: sessionStorage 可能被手动篡改；损坏时回退默认时长即可，未来若 sessionStorage JSON 变多再抽通用 safeParse。
+    timeouts = {};
+  }
+  if (type === 'choice') return timeouts.choice || 30;
+  if (type === 'multiple') return timeouts.multi || 45;
+  return timeouts.fill || 60;
+}
+
 let examId = null;
 let examTotalCount = 0;
 let selectedAnswer = null;
@@ -402,7 +424,7 @@ router.add('/exam/setup', async () => {
     banks.forEach(b => {
       bankSelect.innerHTML += `
         <div class="col-md-4 col-6">
-          <div class="bank-check-card" data-question-count="${b.question_count}" onclick="toggleBankSelect(this)">
+          <div class="bank-check-card" data-question-count="${b.question_count}" onclick="toggleBankSelect(this, event)">
             <div class="form-check">
               <input type="checkbox" class="form-check-input bank-checkbox" value="${b.id}">
               <label class="form-check-label">${escHtml(b.title)} <span class="text-muted">(${b.question_count} 题)</span></label>
@@ -528,6 +550,7 @@ router.add('/result/:id', async ({ id }) => {
   sessionStorage.removeItem('examMode');
   sessionStorage.removeItem('examTimerMode');
   sessionStorage.removeItem('examStartedAt');
+  sessionStorage.removeItem('examTimeouts');
   showNav();
   render('<div class="text-center py-5"><div class="spinner-border"></div></div>');
   try {
@@ -697,11 +720,11 @@ router.add('/wrong-answers', async () => {
     `);
     if (wrongs.length > 0) {
       const container = document.getElementById('wrong-list');
-      let currentBank = '';
+      let currentBankId = null;
       wrongs.forEach(w => {
-        if (w.bank_title !== currentBank) {
-          currentBank = w.bank_title;
-          container.innerHTML += `<h5 class="mt-3 mb-2">${escHtml(currentBank)}</h5>`;
+        if (w.bank_id !== currentBankId) {
+          currentBankId = w.bank_id;
+          container.innerHTML += `<h5 class="mt-3 mb-2">${escHtml(formatBankDisplayName(w.bank_title, w.bank_id))}</h5>`;
         }
         const userAns = Array.isArray(w.user_answer) ? w.user_answer.join(', ') : w.user_answer || '(未作答)';
         const correctAns = Array.isArray(w.correct_answer) ? w.correct_answer.join(', ') : w.correct_answer;
@@ -777,7 +800,7 @@ router.add('/review/setup', async () => {
     banks.forEach(b => {
       bankSelect.innerHTML += `
         <div class="col-md-4 col-6">
-          <div class="bank-check-card" onclick="toggleReviewBankSelect(this)">
+          <div class="bank-check-card" onclick="toggleReviewBankSelect(this, event)">
             <div class="form-check">
               <input type="checkbox" class="form-check-input review-bank-checkbox" value="${b.id}">
               <label class="form-check-label">${escHtml(b.title)} <span class="text-muted">(${b.question_count} 题)</span></label>
@@ -798,10 +821,11 @@ router.add('/review/setup', async () => {
   }
 });
 
-function toggleReviewBankSelect(el) {
+function toggleReviewBankSelect(el, ev) {
   const cb = el.querySelector('.review-bank-checkbox');
-  cb.checked = !cb.checked;
-  el.classList.toggle('selected');
+  // 点击 checkbox 本身时浏览器已原生切换，避免再次反转导致双重 toggle；仅卡片空白点击需手动反转
+  if (!ev || ev.target !== cb) cb.checked = !cb.checked;
+  el.classList.toggle('selected', cb.checked);
   const count = document.querySelectorAll('.review-bank-checkbox:checked').length;
   document.getElementById('review-selected-count').textContent = `已选 ${count} 个题库`;
   updateReviewChapters();
@@ -910,7 +934,10 @@ async function startReview() {
   const selectedBanks = [...document.querySelectorAll('.review-bank-checkbox:checked')].map(cb => parseInt(cb.value));
   if (selectedBanks.length === 0) { alert('请至少选择一个题库'); return; }
   const types = [...document.querySelectorAll('.review-type-filter:checked')].map(cb => cb.value);
+  if (types.length === 0) { alert('请至少选择一种题型'); return; }
   const chapters = [...document.querySelectorAll('.review-chapter-filter:checked')].map(cb => cb.value);
+  const chapterCheckboxes = document.querySelectorAll('.review-chapter-filter');
+  if (chapterCheckboxes.length > 0 && chapters.length === 0) { alert('请至少选择一个章节'); return; }
   const showReviewingOnly = document.getElementById('review-show-reviewing').checked;
   reviewFilter = { bank_ids: selectedBanks, types, chapters: chapters.length > 0 ? chapters : null, show_reviewing_only: showReviewingOnly };
   sessionStorage.setItem('reviewFilter', JSON.stringify(reviewFilter));
@@ -1081,6 +1108,15 @@ function escHtml(s) {
   return div.innerHTML;
 }
 
+function formatBankDisplayName(title, id) {
+  const name = title || '未命名题库';
+  return id == null ? name : `${name} #${id}`;
+}
+
+function isWrongPracticeBankChecked(bank, wrongBankIds) {
+  return wrongBankIds.has(bank.id);
+}
+
 function logout() {
   api.setToken(null);
   state.user = null;
@@ -1125,10 +1161,11 @@ function selectTimerMode(el) {
   document.getElementById('per-question-timeouts').style.display = mode === 'per_question' ? '' : 'none';
 }
 
-function toggleBankSelect(el) {
+function toggleBankSelect(el, ev) {
   const cb = el.querySelector('.bank-checkbox');
-  cb.checked = !cb.checked;
-  el.classList.toggle('selected');
+  // 点击 checkbox 本身时浏览器已原生切换，避免再次反转导致双重 toggle；仅卡片空白点击需手动反转
+  if (!ev || ev.target !== cb) cb.checked = !cb.checked;
+  el.classList.toggle('selected', cb.checked);
   const count = document.querySelectorAll('.bank-checkbox:checked').length;
   document.getElementById('selected-count').textContent = `已选 ${count} 个题库`;
   updateQuestionCount();
@@ -1140,12 +1177,16 @@ async function startExam() {
   if (selectedBanks.length === 0) { alert('请至少选择一个题库'); return; }
   const mode = document.querySelector('.mode-card.active')?.dataset.mode || 'random';
   const types = [...document.querySelectorAll('.type-filter:checked')].map(cb => cb.value);
+  if (types.length === 0) { alert('请至少选择一种题型'); return; }
   const allQuestions = document.getElementById('question-count-all').checked;
   const questionCount = allQuestions ? null : parseInt(document.getElementById('question-count-input').value) || null;
   const timerMode = document.querySelector('[data-timer].active')?.dataset.timer || 'per_question';
   const choiceTimeout = parseInt(document.getElementById('timeout-choice').value) || 30;
+  const multiTimeout = parseInt(document.getElementById('timeout-multi').value) || 45;
   const fillTimeout = parseInt(document.getElementById('timeout-fill').value) || 60;
   const chapters = [...document.querySelectorAll('.exam-chapter-filter:checked')].map(cb => cb.value);
+  const chapterCheckboxes = document.querySelectorAll('.exam-chapter-filter');
+  if (chapterCheckboxes.length > 0 && chapters.length === 0) { alert('请至少选择一个章节'); return; }
   try {
     const res = await api.startExam({ bank_ids: selectedBanks, mode, types, chapters: chapters.length > 0 ? chapters : null, question_count: questionCount, timer_mode: timerMode, choice_timeout: choiceTimeout, judge_fill_timeout: fillTimeout });
     examId = res.exam_id;
@@ -1161,6 +1202,7 @@ async function startExam() {
     sessionStorage.setItem('examTimerMode', examTimerMode);
     sessionStorage.setItem('examStartedAt', examStartedAt);
     sessionStorage.setItem('examElapsedOffset', '0');
+    saveExamTimeouts(choiceTimeout, multiTimeout, fillTimeout);
     router.navigate('/exam');
   } catch (err) {
     alert(err.message);
@@ -1274,14 +1316,8 @@ async function loadQuestionByIndex(index) {
       return;
     }
 
-    const isChoice = q.type === 'choice';
-    const isMultiple = q.type === 'multiple';
     if (examTimerMode !== 'elapsed') {
-      examTimeoutSeconds = isChoice
-        ? (parseInt(document.getElementById('timeout-choice')?.value) || 30)
-        : (isMultiple
-          ? (parseInt(document.getElementById('timeout-multi')?.value) || 45)
-          : (parseInt(document.getElementById('timeout-fill')?.value) || 60));
+      examTimeoutSeconds = getExamTimeoutSeconds(q.type);
       state.questionStartTime = Date.now();
     }
 
@@ -1408,6 +1444,7 @@ async function finishExam() {
     sessionStorage.removeItem('examTimerMode');
     sessionStorage.removeItem('examStartedAt');
     sessionStorage.removeItem('examElapsedOffset');
+    sessionStorage.removeItem('examTimeouts');
     document.removeEventListener('keydown', examKeyHandler);
     router.navigate(`/result/${examId}`);
   } catch (err) {
@@ -2229,17 +2266,17 @@ async function init() {
 async function openWrongPracticeModal() {
   const banks = await api.getBanks();
   const wrongs = await api.getWrongAnswers();
-  const wrongBankTitles = new Set(wrongs.map(w => w.bank_title));
+  const wrongBankIds = new Set(wrongs.map(w => w.bank_id));
 
   let bankCheckboxes = '';
   banks.forEach(b => {
-    const checked = wrongBankTitles.has(b.title) ? 'checked' : '';
+    const checked = isWrongPracticeBankChecked(b, wrongBankIds) ? 'checked' : '';
     bankCheckboxes += `
       <div class="col-md-4 col-6">
         <div class="bank-check-card">
           <div class="form-check">
             <input type="checkbox" class="form-check-input wrong-practice-bank" value="${b.id}" ${checked}>
-            <label class="form-check-label">${escHtml(b.title)} <span class="text-muted">(${b.question_count} 题)</span></label>
+            <label class="form-check-label">${escHtml(formatBankDisplayName(b.title, b.id))} <span class="text-muted">(${b.question_count} 题)</span></label>
           </div>
         </div>
       </div>`;
@@ -2302,6 +2339,7 @@ async function startWrongPractice() {
     examFullPreview = false;
     sessionStorage.removeItem('examCurrentIndex');
     sessionStorage.removeItem('examMode');
+    sessionStorage.removeItem('examTimeouts');
     sessionStorage.setItem('activeExamId', examId);
     sessionStorage.setItem('examTimerMode', examTimerMode);
     sessionStorage.setItem('examStartedAt', examStartedAt);
