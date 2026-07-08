@@ -18,6 +18,20 @@ def _get_question_out(q: Question, review_status: str | None = None) -> ReviewQu
     )
 
 
+def _count_existing_review_records(db: Session, user_id: int, status: str) -> int:
+    return (
+        db.query(ReviewRecord)
+        .join(Question, ReviewRecord.question_id == Question.id)
+        .join(QuestionBank, Question.bank_id == QuestionBank.id)
+        .filter(
+            ReviewRecord.user_id == user_id,
+            ReviewRecord.status == status,
+            QuestionBank.user_id == user_id,
+        )
+        .count()
+    )
+
+
 @router.post("/questions", response_model=list[ReviewQuestionOut])
 def get_review_questions(
     data: ReviewFilter,
@@ -122,14 +136,8 @@ def mark_question(
 
     db.commit()
 
-    known = db.query(ReviewRecord).filter(
-        ReviewRecord.user_id == user.id,
-        ReviewRecord.status == "known",
-    ).count()
-    reviewing = db.query(ReviewRecord).filter(
-        ReviewRecord.user_id == user.id,
-        ReviewRecord.status == "reviewing",
-    ).count()
+    known = _count_existing_review_records(db, user.id, "known")
+    reviewing = _count_existing_review_records(db, user.id, "reviewing")
 
     return ReviewStats(known_count=known, reviewing_count=reviewing, total_reviewed=known + reviewing)
 
@@ -139,12 +147,6 @@ def review_stats(
     user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
-    known = db.query(ReviewRecord).filter(
-        ReviewRecord.user_id == user.id,
-        ReviewRecord.status == "known",
-    ).count()
-    reviewing = db.query(ReviewRecord).filter(
-        ReviewRecord.user_id == user.id,
-        ReviewRecord.status == "reviewing",
-    ).count()
+    known = _count_existing_review_records(db, user.id, "known")
+    reviewing = _count_existing_review_records(db, user.id, "reviewing")
     return ReviewStats(known_count=known, reviewing_count=reviewing, total_reviewed=known + reviewing)

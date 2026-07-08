@@ -752,6 +752,49 @@ def test_25_review_stats(client, auth_headers):
     assert stats["total_reviewed"] >= 1
 
 
+def test_25a_review_stats_ignore_deleted_questions(client, auth_headers):
+    """背题统计只计入当前仍存在的题目（issue #84）"""
+    baseline = client.get("/api/review/stats", headers=auth_headers).json()
+    suffix = uuid.uuid4().hex[:8]
+    r = client.post("/api/question-banks/import", json={
+        "title": f"背题统计删除_{suffix}", "description": "",
+        "questions": [
+            {"type": "judge", "content": "删除单题后不计入已掌握", "answer": "对"},
+            {"type": "judge", "content": "删除题库后不计入待复习", "answer": "错"},
+        ],
+    }, headers=auth_headers)
+    assert r.status_code == 201
+    bank_id = r.json()["id"]
+    questions = client.get(f"/api/question-banks/{bank_id}", headers=auth_headers).json()["questions"]
+    known_qid = questions[0]["id"]
+    reviewing_qid = questions[1]["id"]
+
+    r = client.post("/api/review/mark", json={
+        "question_id": known_qid, "status": "known",
+    }, headers=auth_headers)
+    assert r.status_code == 200
+    r = client.post("/api/review/mark", json={
+        "question_id": reviewing_qid, "status": "reviewing",
+    }, headers=auth_headers)
+    assert r.status_code == 200
+
+    stats = client.get("/api/review/stats", headers=auth_headers).json()
+    assert stats["known_count"] == baseline["known_count"] + 1
+    assert stats["reviewing_count"] == baseline["reviewing_count"] + 1
+    assert stats["total_reviewed"] == baseline["total_reviewed"] + 2
+
+    r = client.delete(f"/api/questions/{known_qid}", headers=auth_headers)
+    assert r.status_code == 204
+    stats = client.get("/api/review/stats", headers=auth_headers).json()
+    assert stats["known_count"] == baseline["known_count"]
+    assert stats["reviewing_count"] == baseline["reviewing_count"] + 1
+    assert stats["total_reviewed"] == baseline["total_reviewed"] + 1
+
+    r = client.delete(f"/api/question-banks/{bank_id}", headers=auth_headers)
+    assert r.status_code == 204
+    assert client.get("/api/review/stats", headers=auth_headers).json() == baseline
+
+
 def test_26_filter_reviewing_only(client, auth_headers):
     r = client.post("/api/review/mark", json={
         "question_id": state._review_first_qid, "status": "known",
