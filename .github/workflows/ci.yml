@@ -31,9 +31,9 @@ jobs:
         with:
           node-version: "20"
       - run: pip install -r requirements.txt
-      - run: pytest test_integration.py -v
+      # 目录收集，新增 test_*.py 自动纳入，不必再逐个点名（曾漏掉 test_auth.py，issue #138）
       # 迁移测试建临时库真跑 alembic，集成测试的 create_all 路径覆盖不到（issue #131）
-      - run: pytest test_migration.py -v
+      - run: pytest -v
       - run: node --test tests/frontend/*.test.js
 
   docker-build:
