@@ -67,15 +67,16 @@ const api = {
     const path = index !== null ? `/exam/${examId}/current?index=${index}` : `/exam/${examId}/current`;
     return this.get(path);
   },
-  submitAnswer(examId, questionId, userAnswer, timeSpent) {
+  submitAnswer(examId, questionId, userAnswer, timeSpent, elapsedSeconds = null) {
     return this.post(`/exam/${examId}/answer`, {
       exam_id: examId,
       question_id: questionId,
       user_answer: userAnswer,
       time_spent_seconds: timeSpent,
+      elapsed_seconds: elapsedSeconds,
     });
   },
-  finishExam(examId) { return this.post(`/exam/${examId}/finish`, {}); },
+  finishExam(examId, elapsedSeconds = null) { return this.post(`/exam/${examId}/finish`, { elapsed_seconds: elapsedSeconds }); },
   getExamPreview(examId) { return this.get(`/exam/${examId}/preview`); },
   getExamResult(examId) { return this.get(`/exam/${examId}/result`); },
 

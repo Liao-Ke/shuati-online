@@ -113,6 +113,13 @@ class AnswerSubmit(BaseModel):
     question_id: int
     user_answer: str | list[str] | None = None
     time_spent_seconds: int = Field(ge=0)
+    # 整卷计时模式下前端计时器口径的已用秒数（不含暂停时长），仅最后一题自动结束时生效（issue #115）
+    elapsed_seconds: int | None = Field(default=None, ge=0)
+
+
+class ExamFinish(BaseModel):
+    # 整卷计时模式下前端计时器口径的已用秒数（不含暂停时长），issue #115
+    elapsed_seconds: int | None = Field(default=None, ge=0)
 
 
 class AnswerResult(BaseModel):

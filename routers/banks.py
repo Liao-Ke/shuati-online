@@ -219,7 +219,8 @@ def update_bank(
         if not data.title.strip():
             raise HTTPException(status_code=400, detail="标题不能为空")
         bank.title = data.title
-    if data.description is not None:
+    # 以 model_fields_set 区分「未传」与「显式 null」：显式 null 表示清空描述（issue #112）
+    if "description" in data.model_fields_set:
         bank.description = data.description
     db.commit()
     db.refresh(bank)
