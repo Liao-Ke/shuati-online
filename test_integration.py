@@ -1863,3 +1863,27 @@ def test_76_eight_options_allowed_across_all_entrypoints(client, auth_headers):
         if b["title"] == "8选项上限-批量":
             client.delete(f"/api/question-banks/{b['id']}", headers=auth_headers)
             break
+
+
+# ── Test: 单空填空题提交数组答案返回 400 而非 500（issue #114）──
+
+
+def test_77_submit_answer_rejects_list_for_single_blank_fill(client, auth_headers):
+    """单空填空题（answer 为字符串）提交数组答案时返回 400，且不写入答题记录（issue #114）"""
+    # sequential 按 (bank_id, sort_order, id) 排序，首题即 BANK_DATA 中的单空题「中国的首都是____」
+    exam_id, qid = _start_exam_question(client, auth_headers, "fill")
+    r = client.post(f"/api/exam/{exam_id}/answer", json={
+        "exam_id": exam_id, "question_id": qid,
+        "user_answer": ["北京", "上海"], "time_spent_seconds": 1,
+    }, headers=auth_headers)
+    assert r.status_code == 400, f"应返回 400 而非 {r.status_code}: {r.text}"
+    assert "字符串" in r.text
+    _assert_exam_has_no_answers(client, auth_headers, exam_id)
+
+    # 同一场考试提交合法字符串答案仍正常判分
+    r = client.post(f"/api/exam/{exam_id}/answer", json={
+        "exam_id": exam_id, "question_id": qid,
+        "user_answer": "北京", "time_spent_seconds": 1,
+    }, headers=auth_headers)
+    assert r.status_code == 200
+    assert r.json()["is_correct"] is True
