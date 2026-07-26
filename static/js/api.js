@@ -62,6 +62,7 @@ const api = {
   deleteBank(id) { return this.delete(`/question-banks/${id}`); },
 
   startExam(data) { return this.post('/exam/start', data); },
+  getUnfinishedExams() { return this.get('/exam/unfinished'); },
   getExamProgress(examId) { return this.get(`/exam/${examId}/progress`); },
   getCurrentQuestion(examId, index = null) {
     const path = index !== null ? `/exam/${examId}/current?index=${index}` : `/exam/${examId}/current`;

@@ -2366,3 +2366,143 @@ def test_81b_orphan_answer_without_snapshot_shows_placeholder(client, auth_heade
         assert a["content"] == "（题目已删除，仅保留作答记录）"
         assert a["correct_answer"] is None
         assert a["user_answer"] is not None
+
+
+# ── Test: 恢复未完成考试（issue #44）──
+
+
+def _register_isolated_user(client, prefix):
+    """注册独立用户，避免依赖前序测试留下的进行中考试；重置限流计数防 429"""
+    from routers.limiter import limiter
+    limiter._storage.reset()
+    suffix = uuid.uuid4().hex[:8]
+    r = client.post("/api/auth/register", json={"username": f"{prefix}_{suffix}", "password": "123456"})
+    assert r.status_code == 200, f"注册失败: {r.text}"
+    return {"Authorization": f"Bearer {r.json()['access_token']}"}
+
+
+def test_44_unfinished_requires_auth(client):
+    r = client.get("/api/exam/unfinished")
+    assert r.status_code == 401
+
+
+def test_44_unfinished_exam_lifecycle(client):
+    """未完成考试列表：空 → 开考后可见 → 作答后计数递增 → 结束后消失"""
+    headers = _register_isolated_user(client, "resume")
+
+    # 初始为空
+    r = client.get("/api/exam/unfinished", headers=headers)
+    assert r.status_code == 200
+    assert r.json() == []
+
+    # 导入题库并开始考试
+    r = client.post("/api/question-banks/import", json=BANK_DATA, headers=headers)
+    assert r.status_code == 201, r.text
+    bank_id = r.json()["id"]
+    r = client.post("/api/exam/start", json={
+        "bank_ids": [bank_id], "mode": "sequential", "timer_mode": "elapsed",
+    }, headers=headers)
+    assert r.status_code == 200, r.text
+    exam_id = r.json()["exam_id"]
+    total = r.json()["total_count"]
+
+    # 列表包含该考试且摘要字段正确
+    r = client.get("/api/exam/unfinished", headers=headers)
+    assert r.status_code == 200
+    data = r.json()
+    assert len(data) == 1
+    item = data[0]
+    assert item["exam_id"] == exam_id
+    assert item["answered_count"] == 0
+    assert item["total_count"] == total
+    assert item["timer_mode"] == "elapsed"
+    assert item["mode"] == "sequential"
+    assert item["bank_titles"] == [BANK_DATA["title"]]
+    assert item["started_at"]
+
+    # 作答一题后 answered_count 递增
+    q = client.get(f"/api/exam/{exam_id}/current", headers=headers).json()["question"]
+    answer_by_type = {"choice": "A", "judge": "对", "multiple": ["A"]}
+    if q["type"] == "fill":
+        blanks = q.get("blank_count") or 1
+        ans = ["x"] * blanks if blanks > 1 else "x"
+    else:
+        ans = answer_by_type[q["type"]]
+    r = client.post(f"/api/exam/{exam_id}/answer", json={
+        "exam_id": exam_id, "question_id": q["id"],
+        "user_answer": ans, "time_spent_seconds": 1,
+    }, headers=headers)
+    assert r.status_code == 200, r.text
+    r = client.get("/api/exam/unfinished", headers=headers)
+    assert r.json()[0]["answered_count"] == 1
+
+    # 其他用户看不到（用户隔离）
+    other_headers = _register_isolated_user(client, "resume2")
+    r = client.get("/api/exam/unfinished", headers=other_headers)
+    assert r.json() == []
+
+    # 放弃（前端跨会话遗留口径传 elapsed_seconds=0）后不再列出，
+    # 且整卷计时用时不回退为 finished_at-started_at 的墙钟差
+    r = client.post(f"/api/exam/{exam_id}/finish", json={"elapsed_seconds": 0}, headers=headers)
+    assert r.status_code == 200
+    r = client.get("/api/exam/unfinished", headers=headers)
+    assert r.json() == []
+    r = client.get(f"/api/exam/{exam_id}/result", headers=headers)
+    assert r.status_code == 200
+    assert r.json()["duration_seconds"] == 0
+
+
+def test_44_unfinished_multiple_sorted_desc(client):
+    """多场未完成考试按开始时间倒序返回（最新在前）"""
+    headers = _register_isolated_user(client, "resume3")
+    r = client.post("/api/question-banks/import", json=BANK_DATA, headers=headers)
+    bank_id = r.json()["id"]
+
+    ids = []
+    for _ in range(2):
+        r = client.post("/api/exam/start", json={
+            "bank_ids": [bank_id], "mode": "random",
+        }, headers=headers)
+        assert r.status_code == 200
+        ids.append(r.json()["exam_id"])
+
+    r = client.get("/api/exam/unfinished", headers=headers)
+    data = r.json()
+    assert {d["exam_id"] for d in data} == set(ids)
+    starts = [d["started_at"] for d in data]
+    # 同秒开考时 started_at 相同，只断言非递增（倒序），不断言严格顺序
+    assert starts == sorted(starts, reverse=True)
+
+
+def test_44_unfinished_bank_titles_ownership(client):
+    """exam.bank_ids 含他人题库 id 时（issue #125 历史数据 / id 复用），标题不得泄露"""
+    victim_headers = _register_isolated_user(client, "resume_v")
+    r = client.post("/api/question-banks/import", json={**BANK_DATA, "title": "受害者私有题库"}, headers=victim_headers)
+    victim_bank_id = r.json()["id"]
+
+    attacker_headers = _register_isolated_user(client, "resume_a")
+    r = client.post("/api/question-banks/import", json=BANK_DATA, headers=attacker_headers)
+    own_bank_id = r.json()["id"]
+    r = client.post("/api/exam/start", json={
+        "bank_ids": [own_bank_id], "mode": "sequential",
+    }, headers=attacker_headers)
+    exam_id = r.json()["exam_id"]
+
+    # 直接改库模拟 bank_ids 含他人题库 id 的历史脏数据
+    import json
+
+    from database import SessionLocal
+    from models import ExamRecord
+    db = SessionLocal()
+    try:
+        db.query(ExamRecord).filter(ExamRecord.id == exam_id).update(
+            {ExamRecord.bank_ids: json.dumps([own_bank_id, victim_bank_id])}
+        )
+        db.commit()
+    finally:
+        db.close()
+
+    r = client.get("/api/exam/unfinished", headers=attacker_headers)
+    titles = r.json()[0]["bank_titles"]
+    assert "受害者私有题库" not in titles, "他人题库标题不得出现在未完成考试摘要中"
+    assert titles == [BANK_DATA["title"]]

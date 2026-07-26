@@ -19,6 +19,7 @@ from schemas import (
     ExamResult,
     ExamStart,
     QuestionOut,
+    UnfinishedExam,
 )
 from utils import parse_answer, parse_json_field
 
@@ -135,6 +136,40 @@ def start_exam(data: ExamStart, user: User = Depends(get_current_user), db: Sess
 
     logger.info(f"用户 {user.id} 开始考试，exam_id={exam.id}，题目数={len(selected)}")
     return {"exam_id": exam.id, "total_count": len(selected), "timer_mode": data.timer_mode, "started_at": exam.started_at.isoformat()}
+
+
+@router.get("/unfinished", response_model=list[UnfinishedExam])
+def list_unfinished(user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+    """列出当前用户所有进行中的考试，供前端展示恢复入口（issue #44）"""
+    exams = db.query(ExamRecord).filter(
+        ExamRecord.user_id == user.id, ExamRecord.status == "in_progress"
+    ).order_by(ExamRecord.started_at.desc()).all()
+
+    result = []
+    # ponytail: 每场考试各查一次已答数和题库标题（N+1）。未完成考试通常只有个位数，
+    # 若未来允许大量并存，升级为按 exam_id/bank_id 聚合的两条批量查询。
+    for exam in exams:
+        answered_count = db.query(func.count(AnswerRecord.id)).filter(
+            AnswerRecord.exam_id == exam.id
+        ).scalar() or 0
+        bank_ids = parse_json_field(exam.bank_ids) or []
+        # 复核题库归属：exam.bank_ids 历史上可能含未经归属校验的 id（issue #125），
+        # 或题库删除后 id 被他人复用（issue #123 威胁模型），不过滤会泄露他人题库标题
+        titles = [
+            b.title for b in db.query(QuestionBank).filter(
+                QuestionBank.id.in_(bank_ids), QuestionBank.user_id == user.id
+            ).all()
+        ] if bank_ids else []
+        result.append(UnfinishedExam(
+            exam_id=exam.id,
+            bank_titles=titles,
+            mode=exam.mode,
+            timer_mode=exam.timer_mode,
+            total_count=exam.question_count or 0,
+            answered_count=answered_count,
+            started_at=exam.started_at.isoformat(),
+        ))
+    return result
 
 
 @router.get("/{exam_id}/current")
