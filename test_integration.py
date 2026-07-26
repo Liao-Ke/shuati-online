@@ -1,3 +1,4 @@
+import json
 import time
 import uuid
 from datetime import UTC, datetime, timedelta
@@ -2506,3 +2507,38 @@ def test_44_unfinished_bank_titles_ownership(client):
     titles = r.json()[0]["bank_titles"]
     assert "受害者私有题库" not in titles, "他人题库标题不得出现在未完成考试摘要中"
     assert titles == [BANK_DATA["title"]]
+
+
+# ── Test: 开考快照题库归属校验（issue #125）──
+
+
+def test_125_start_exam_stores_only_owned_bank_ids(client, auth_headers):
+    """携带他人题库 id 开考时，快照 bank_ids 只保留归属校验通过的自己的题库（issue #125）"""
+    # 受害者注册并导入自己的题库
+    r = client.post("/api/auth/register", json={"username": f"victim_{uuid.uuid4().hex[:8]}", "password": "123456"})
+    assert r.status_code == 200, r.text
+    victim_headers = {"Authorization": f"Bearer {r.json()['access_token']}"}
+    r = client.post("/api/question-banks/import", json=BANK_DATA, headers=victim_headers)
+    assert r.status_code == 201, r.text
+    victim_bank_id = r.json()["id"]
+
+    # 攻击者混入受害者的题库 id 开考，请求仍放行（保留既有宽松行为）
+    r = client.post("/api/exam/start", json={
+        "bank_ids": [victim_bank_id, state.bank_id], "mode": "sequential",
+        "choice_timeout": 30, "judge_fill_timeout": 60,
+    }, headers=auth_headers)
+    assert r.status_code == 200, r.text
+    exam_id = r.json()["exam_id"]
+
+    # 快照只应存下攻击者自己的题库 id，不含受害者的
+    from database import SessionLocal
+    from models import ExamRecord
+
+    db = SessionLocal()
+    try:
+        exam = db.query(ExamRecord).filter(ExamRecord.id == exam_id).first()
+        stored = json.loads(exam.bank_ids)
+    finally:
+        db.close()
+    assert victim_bank_id not in stored, f"快照混入他人题库 id：{stored}"
+    assert stored == [state.bank_id], f"快照应仅含自己的题库，实际 {stored}"
