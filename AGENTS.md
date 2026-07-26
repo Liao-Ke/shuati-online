@@ -45,7 +45,7 @@ features/              # 功能实现说明文档
 ## 技术要点
 
 - **FastAPI** SPWA，后端渲染 SPA，前端用原生 JS + Bootstrap 5 + hash 路由
-- **SQLite** 无迁移系统，`Base.metadata.create_all(bind=engine)` 自动建表
+- **SQLite** schema 由 Alembic 迁移管理（Docker 启动自动 `alembic upgrade head`），开发环境 `Base.metadata.create_all(bind=engine)` 兜底建表；应用连接强制 `PRAGMA foreign_keys=ON`，`questions`/`question_banks` 主键带 `AUTOINCREMENT` 不复用（#131）
 - **JWT** 7 天过期，`python-jose[cryptography]`，bearer 认证
 - **密码** bcrypt via passlib
 - **多选题库导入** JSON 格式（见 README），支持 choice/fill/judge 三种题型

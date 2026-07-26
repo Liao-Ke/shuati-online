@@ -33,6 +33,9 @@ class User(Base):
 
 class QuestionBank(Base):
     __tablename__ = "question_banks"
+    # SQLite 无 AUTOINCREMENT 时新行取 max(rowid)+1，删除最高位行后 id 被复用，
+    # 考试快照/答题记录里的旧 id 会重新指向他人新行——#84/#123/#125 的共同根因（issue #131）
+    __table_args__ = {"sqlite_autoincrement": True}
 
     id = Column(Integer, primary_key=True, index=True)
     user_id = Column(Integer, ForeignKey("users.id"), nullable=False)
@@ -47,6 +50,8 @@ class QuestionBank(Base):
 
 class Question(Base):
     __tablename__ = "questions"
+    # 同 QuestionBank：主键单调不复用（issue #131）
+    __table_args__ = {"sqlite_autoincrement": True}
 
     id = Column(Integer, primary_key=True, index=True)
     bank_id = Column(Integer, ForeignKey("question_banks.id"), nullable=False)
@@ -61,8 +66,8 @@ class Question(Base):
     question_bank = relationship("QuestionBank", back_populates="questions")
     # 答题记录属于历史答卷，题目删除后置空 question_id 保留留痕
     answer_records = relationship("AnswerRecord", back_populates="question")
-    # 背题记录表达「当前掌握状态」，题目删除后即失去意义，必须级联删除：
-    # SQLite 的 INTEGER PRIMARY KEY 会复用已删除行的 id，残留记录会被新题目继承（issue #84）
+    # 背题记录表达「当前掌握状态」，题目删除后即失去意义，必须级联删除（issue #84）。
+    # 历史上还叠加了主键复用导致残留记录被新题目继承的问题，#131 加 AUTOINCREMENT 后已根除复用
     review_records = relationship(
         "ReviewRecord", back_populates="question", cascade="all, delete-orphan",
     )
