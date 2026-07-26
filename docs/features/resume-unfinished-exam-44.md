@@ -9,7 +9,7 @@
 ### 后端
 
 - `schemas.py`：新增 `UnfinishedExam` 摘要模型。
-- `routers/exam.py`：新增 `GET /api/exam/unfinished`，返回当前用户全部进行中考试（exam_id、题库标题、模式、计时方式、已答/总题数、开始时间），按开始时间倒序。
+- `routers/exam.py`：新增 `GET /api/exam/unfinished`，返回当前用户全部进行中考试（exam_id、题库标题、模式、计时方式、已答/总题数、开始时间），按开始时间倒序。题库标题查询带 `user_id` 归属过滤：`exam.bank_ids` 历史上可能含未经归属校验的 id（issue #125）或已被他人复用的 id（issue #123 威胁模型），不过滤会泄露他人题库标题（审查中补充，含跨用户测试）。
 
 「放弃」不引入新状态/新接口，复用 `POST /api/exam/:id/finish`（未答题计为错误），与已有"提前结束"语义一致。
 

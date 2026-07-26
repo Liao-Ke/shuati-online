@@ -5,7 +5,7 @@ import zlib
 
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy import func
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, selectinload
 
 from auth import get_current_user
 from database import get_db
@@ -55,16 +55,28 @@ def _serialize_question(q: Question, hide_answer: bool = True) -> QuestionOut:
 
 def _load_all_exam_questions(exam: ExamRecord, db: Session) -> tuple[list[Question], dict[int, AnswerRecord]]:
     bank_ids = parse_json_field(exam.bank_ids)
-    banks = db.query(QuestionBank).filter(QuestionBank.id.in_(bank_ids)).all()
-    all_questions = []
-    for bank in banks:
-        all_questions.extend(bank.questions)
-
     if exam.question_ids:
-        selected_ids = set(parse_json_field(exam.question_ids))
-        all_questions = [q for q in all_questions if q.id in selected_ids]
+        # 按开考时的 question_ids 快照一次查回全部题目，避免逐题库懒加载的 1+N（issue #43）。
+        # bank_id 过滤保持旧实现语义（题目必须仍在本场考试的题库范围内），它不是归属校验：
+        # exam.bank_ids 来自用户请求且未做归属过滤，题库归属校验缺口见 issue #123。
+        selected_ids = parse_json_field(exam.question_ids)
+        if not isinstance(selected_ids, list):
+            # 快照损坏（无法解析为列表）时保持旧实现的降级口径：按空集过滤返回空考试，而非 500
+            selected_ids = []
+        all_questions = db.query(Question).filter(
+            Question.id.in_(selected_ids), Question.bank_id.in_(bank_ids)
+        ).all()
+    else:
+        # 兼容 issue #22 之前没有 question_ids 快照的历史考试，selectinload 一次批量加载
+        banks = db.query(QuestionBank).options(selectinload(QuestionBank.questions)).filter(
+            QuestionBank.id.in_(bank_ids)
+        ).all()
+        all_questions = [q for bank in banks for q in bank.questions]
 
     if exam.mode == "random":
+        # shuffle 结果依赖输入顺序：先按 (bank_id, id) 复现旧实现「逐题库追加」的列表顺序，
+        # 保证进行中的随机模式考试题序不变
+        all_questions.sort(key=lambda q: (q.bank_id or 0, q.id or 0))
         random.Random(exam.id).shuffle(all_questions)
     else:
         all_questions.sort(key=lambda q: (q.bank_id or 0, q.sort_order or 0, q.id or 0))
@@ -141,8 +153,12 @@ def list_unfinished(user: User = Depends(get_current_user), db: Session = Depend
             AnswerRecord.exam_id == exam.id
         ).scalar() or 0
         bank_ids = parse_json_field(exam.bank_ids) or []
+        # 复核题库归属：exam.bank_ids 历史上可能含未经归属校验的 id（issue #125），
+        # 或题库删除后 id 被他人复用（issue #123 威胁模型），不过滤会泄露他人题库标题
         titles = [
-            b.title for b in db.query(QuestionBank).filter(QuestionBank.id.in_(bank_ids)).all()
+            b.title for b in db.query(QuestionBank).filter(
+                QuestionBank.id.in_(bank_ids), QuestionBank.user_id == user.id
+            ).all()
         ] if bank_ids else []
         result.append(UnfinishedExam(
             exam_id=exam.id,
@@ -320,8 +336,14 @@ def submit_answer(
         is_correct = False
 
     user_answer_str = json.dumps(data.user_answer, ensure_ascii=False) if isinstance(data.user_answer, list) else (data.user_answer or "")
+    # 题目快照：题目/题库删除后历史详情回退此快照展示（issue #81）
+    snapshot_str = json.dumps({
+        "type": question.type, "chapter": question.chapter, "content": question.content,
+        "options": options, "correct_answer": correct_answer, "analysis": question.analysis,
+    }, ensure_ascii=False)
     record = AnswerRecord(
         exam_id=exam.id, question_id=question.id,
+        question_snapshot=snapshot_str,
         user_answer=user_answer_str, is_correct=is_correct,
         time_spent_seconds=data.time_spent_seconds,
     )
@@ -450,20 +472,36 @@ def exam_result(exam_id: int, user: User = Depends(get_current_user), db: Sessio
     result_answers = []
     for a in answers:
         q = questions_map.get(a.question_id)
-        if not q:
-            continue
-        correct_answer = parse_answer(q.answer, q.type)
         user_answer = parse_json_field(a.user_answer)
+        if q:
+            result_answers.append({
+                "question_id": q.id,
+                "type": q.type,
+                "content": q.content,
+                "options": parse_json_field(q.options),
+                "correct_answer": parse_answer(q.answer, q.type),
+                "user_answer": user_answer,
+                "is_correct": a.is_correct,
+                "time_spent": a.time_spent_seconds,
+                "analysis": q.analysis,
+            })
+            continue
+        # 题目已删除：回退作答时的快照；无快照的历史孤儿记录给占位，避免汇总数与明细数不一致（issue #81）
+        try:
+            snap = json.loads(a.question_snapshot) if a.question_snapshot else {}
+        except (json.JSONDecodeError, TypeError):
+            snap = {}
         result_answers.append({
-            "question_id": q.id,
-            "type": q.type,
-            "content": q.content,
-            "options": parse_json_field(q.options),
-            "correct_answer": correct_answer,
+            "question_id": a.question_id,
+            "type": snap.get("type"),
+            "content": snap.get("content") or "（题目已删除，仅保留作答记录）",
+            "options": snap.get("options"),
+            "correct_answer": snap.get("correct_answer"),
             "user_answer": user_answer,
             "is_correct": a.is_correct,
             "time_spent": a.time_spent_seconds,
-            "analysis": q.analysis,
+            "analysis": snap.get("analysis"),
+            "question_deleted": True,
         })
 
     total = exam.correct_count + exam.wrong_count

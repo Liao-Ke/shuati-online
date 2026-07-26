@@ -603,22 +603,7 @@ router.add('/result/:id', async ({ id }) => {
       return;
     }
     result.answers.forEach((a, i) => {
-      const icon = a.is_correct ? '<span class="text-success">\u2713</span>' : '<span class="text-danger">\u2717</span>';
-      const userAns = Array.isArray(a.user_answer) ? a.user_answer.join(', ') : a.user_answer || '(未作答)';
-      const correctAns = Array.isArray(a.correct_answer) ? a.correct_answer.join(', ') : a.correct_answer;
-      container.innerHTML += `
-        <div class="answer-review-item ${a.is_correct ? 'correct' : 'wrong'}">
-          <div class="d-flex justify-content-between">
-            <strong>第 ${i + 1} 题 ${icon}</strong>
-            <small class="text-muted">${a.time_spent || 0}s</small>
-          </div>
-          <p class="mb-1 mt-1">${escHtml(a.content)}</p>
-          ${renderOptions(a.options, a.user_answer, a.correct_answer)}
-          <p class="mb-0 small"><span class="${a.is_correct ? 'text-success' : 'text-danger'}">你的答案: ${escHtml(userAns)}</span></p>
-          <p class="mb-0 small text-success">正确答案: ${escHtml(correctAns)}</p>
-          ${a.analysis ? `<p class="mb-0 small text-muted mt-1">解析: ${escHtml(a.analysis)}</p>` : ''}
-        </div>
-      `;
+      container.innerHTML += renderAnswerReviewItem(a, i);
     });
   } catch (err) {
     if (err.status === 409) {
@@ -711,22 +696,7 @@ router.add('/history/:id', async ({ id }) => {
       return;
     }
     result.answers.forEach((a, i) => {
-      const icon = a.is_correct ? '<span class="text-success">\u2713</span>' : '<span class="text-danger">\u2717</span>';
-      const userAns = Array.isArray(a.user_answer) ? a.user_answer.join(', ') : a.user_answer || '(未作答)';
-      const correctAns = Array.isArray(a.correct_answer) ? a.correct_answer.join(', ') : a.correct_answer;
-      container.innerHTML += `
-        <div class="answer-review-item ${a.is_correct ? 'correct' : 'wrong'}">
-          <div class="d-flex justify-content-between">
-            <strong>第 ${i + 1} 题 ${icon}</strong>
-            <small class="text-muted">${a.time_spent || 0}s</small>
-          </div>
-          <p class="mb-1 mt-1">${escHtml(a.content)}</p>
-          ${renderOptions(a.options, a.user_answer, a.correct_answer)}
-          <p class="mb-0 small"><span class="${a.is_correct ? 'text-success' : 'text-danger'}">你的答案: ${escHtml(userAns)}</span></p>
-          <p class="mb-0 small text-success">正确答案: ${escHtml(correctAns)}</p>
-          ${a.analysis ? `<p class="mb-0 small text-muted mt-1">解析: ${escHtml(a.analysis)}</p>` : ''}
-        </div>
-      `;
+      container.innerHTML += renderAnswerReviewItem(a, i);
     });
   } catch {
     render('<div class="alert alert-danger">加载失败</div>');
@@ -1206,6 +1176,28 @@ function parseAnswerArray(val) {
 // 数组答案展示为 "A, B" 可读格式，与结果页/历史详情一致（issue #111）
 function formatAnswerText(val) {
   return Array.isArray(val) ? val.join(', ') : val;
+}
+
+// 结果页与历史详情共用的答案回顾条目。题目已删除时回退后端快照并加徽标；
+// 无快照的旧记录 correct_answer 为 null，隐藏正确答案与解析行（issue #81）
+function renderAnswerReviewItem(a, i) {
+  const icon = a.is_correct ? '<span class="text-success">\u2713</span>' : '<span class="text-danger">\u2717</span>';
+  const deletedBadge = a.question_deleted ? ' <span class="badge bg-secondary">题目已删除</span>' : '';
+  const userAns = Array.isArray(a.user_answer) ? a.user_answer.join(', ') : a.user_answer || '(未作答)';
+  const correctAns = Array.isArray(a.correct_answer) ? a.correct_answer.join(', ') : a.correct_answer;
+  return `
+    <div class="answer-review-item ${a.is_correct ? 'correct' : 'wrong'}">
+      <div class="d-flex justify-content-between">
+        <strong>第 ${i + 1} 题 ${icon}${deletedBadge}</strong>
+        <small class="text-muted">${a.time_spent || 0}s</small>
+      </div>
+      <p class="mb-1 mt-1">${escHtml(a.content)}</p>
+      ${renderOptions(a.options, a.user_answer, a.correct_answer)}
+      <p class="mb-0 small"><span class="${a.is_correct ? 'text-success' : 'text-danger'}">你的答案: ${escHtml(userAns)}</span></p>
+      ${a.correct_answer != null ? `<p class="mb-0 small text-success">正确答案: ${escHtml(correctAns)}</p>` : ''}
+      ${a.analysis ? `<p class="mb-0 small text-muted mt-1">解析: ${escHtml(a.analysis)}</p>` : ''}
+    </div>
+  `;
 }
 
 function renderOptions(options, userAnswer, correctAnswer) {
