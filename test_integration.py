@@ -2817,3 +2817,41 @@ def test_144_question_sampling_varies_across_exams(client, auth_headers):
 
     assert len(subsets) > 1, "8 次开考抽到的题目子集完全相同，抽样仍是确定性的"
     client.delete(f"/api/question-banks/{new_bank}", headers=auth_headers)
+
+
+def test_146_fill_answer_rejects_empty_array(client):
+    """填空题答案为空数组时，导入/新建/编辑三条路径均应 400 拒绝（issue #146）。
+    空数组入库会生成 blank_count=0 的畸形题：前端渲染 0 个输入框无法作答，
+    判分时空提交与 [] 逐位比对全部通过直接判对。
+    用隔离用户：编辑路径的进行中考试检查（#90）对共享用户被 test_43d 留下的
+    损坏 question_ids 快照会 500（parse_json_field 未防护，属独立 bug）。"""
+    headers = _register_isolated_user(client, "u146")
+    bank = _import_bank(client, headers, title=f"空数组填空宿主-{uuid.uuid4().hex[:8]}")
+
+    # 导入路径（routers/banks.py）
+    r = client.post("/api/question-banks/import", json={
+        "title": "空数组填空", "questions": [{"type": "fill", "content": "x", "answer": []}],
+    }, headers=headers)
+    assert r.status_code == 400
+    assert "不能为空" in r.text
+
+    # 新建路径（routers/questions.py）
+    r = client.post(f"/api/question-banks/{bank}/questions", json={
+        "type": "fill", "content": "x", "answer": [],
+    }, headers=headers)
+    assert r.status_code == 400
+    assert "不能为空" in r.text
+
+    # 编辑路径：合法多空题改成空数组同样拒绝
+    r = client.post(f"/api/question-banks/{bank}/questions", json={
+        "type": "fill", "content": "a____b____c", "answer": ["1", "2"],
+    }, headers=headers)
+    assert r.status_code == 201
+    qid = r.json()["id"]
+    r = client.put(f"/api/questions/{qid}", json={"answer": []}, headers=headers)
+    assert r.status_code == 400
+    assert "不能为空" in r.text
+    # 原答案未被破坏（题库详情当前以原始 JSON 字符串返回 answer，见 issue #139）
+    r = client.get(f"/api/question-banks/{bank}", headers=headers)
+    q = next(q for q in r.json()["questions"] if q["id"] == qid)
+    assert q["answer"] in (["1", "2"], '["1", "2"]')

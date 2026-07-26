@@ -48,7 +48,10 @@ def validate_bank_import(data: BankImport) -> list[str]:
                     errors.append(f"{prefix}(选择题): 答案 '{q.answer}' 不属于现有选项 {valid_labels}")
         elif q.type == "fill":
             if isinstance(q.answer, list):
-                if any(not a or not a.strip() for a in q.answer):
+                # 空数组会生成 blank_count=0、空提交判对的畸形题（issue #146）
+                if not q.answer:
+                    errors.append(f"{prefix}(填空题): 答案数组不能为空")
+                elif any(not a or not a.strip() for a in q.answer):
                     errors.append(f"{prefix}(填空题): 答案数组不能包含空值")
             elif not q.answer or not isinstance(q.answer, str) or not q.answer.strip():
                 errors.append(f"{prefix}(填空题): 答案不能为空")
