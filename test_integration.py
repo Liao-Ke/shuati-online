@@ -1863,3 +1863,76 @@ def test_76_eight_options_allowed_across_all_entrypoints(client, auth_headers):
         if b["title"] == "8选项上限-批量":
             client.delete(f"/api/question-banks/{b['id']}", headers=auth_headers)
             break
+
+
+# ── Test: 编辑时显式 null 清空章节/解析/描述（issue #112）──
+
+
+def test_78_update_question_null_clears_chapter_and_analysis(client, auth_headers):
+    """编辑题目显式传 null 时清空章节与解析，并持久化（issue #112）"""
+    _ensure_test_bank(client, auth_headers)
+    r = client.post(f"/api/question-banks/{state.bank_id}/questions", json={
+        "type": "judge", "content": "清空字段测试题", "chapter": "第一章",
+        "answer": "对", "analysis": "原解析",
+    }, headers=auth_headers)
+    assert r.status_code == 201
+    qid = r.json()["id"]
+
+    # 模拟前端 saveQForm：清空输入框后以 null 发送全部字段
+    r = client.put(f"/api/questions/{qid}", json={
+        "type": "judge", "chapter": None, "content": "清空字段测试题",
+        "options": None, "answer": "对", "analysis": None,
+    }, headers=auth_headers)
+    assert r.status_code == 200
+    assert r.json()["chapter"] is None, f"chapter 应被清空: {r.text}"
+    assert r.json()["analysis"] is None, f"analysis 应被清空: {r.text}"
+
+    # 重新读取确认已持久化
+    r = client.get(f"/api/question-banks/{state.bank_id}", headers=auth_headers)
+    q = next(x for x in r.json()["questions"] if x["id"] == qid)
+    assert q["chapter"] is None
+    assert q["analysis"] is None
+    client.delete(f"/api/questions/{qid}", headers=auth_headers)
+
+
+def test_79_update_question_omitted_fields_keep_old_values(client, auth_headers):
+    """请求体中省略 chapter/analysis 键时保留旧值，向后兼容（issue #112）"""
+    _ensure_test_bank(client, auth_headers)
+    r = client.post(f"/api/question-banks/{state.bank_id}/questions", json={
+        "type": "judge", "content": "省略字段测试题", "chapter": "第二章",
+        "answer": "错", "analysis": "解析保留",
+    }, headers=auth_headers)
+    assert r.status_code == 201
+    qid = r.json()["id"]
+
+    r = client.put(f"/api/questions/{qid}", json={"content": "仅改内容"}, headers=auth_headers)
+    assert r.status_code == 200
+    assert r.json()["chapter"] == "第二章"
+    assert r.json()["analysis"] == "解析保留"
+    client.delete(f"/api/questions/{qid}", headers=auth_headers)
+
+
+def test_80_update_bank_description_null_clears_omitted_keeps(client, auth_headers):
+    """题库描述：省略键保留旧值，显式 null 清空（issue #112）"""
+    r = client.post("/api/question-banks/import", json={
+        "title": f"清空描述-{uuid.uuid4().hex[:8]}", "description": "原始描述",
+        "questions": [{"type": "judge", "content": "占位题", "answer": "对"}],
+    }, headers=auth_headers)
+    assert r.status_code == 201
+    bank_id = r.json()["id"]
+
+    # 省略 description 键 → 保留旧值
+    r = client.put(f"/api/question-banks/{bank_id}", json={"title": "改名不动描述"}, headers=auth_headers)
+    assert r.status_code == 200
+    assert r.json()["description"] == "原始描述"
+
+    # 显式 null → 清空（模拟前端 saveBankEdit）
+    r = client.put(f"/api/question-banks/{bank_id}", json={
+        "title": "改名不动描述", "description": None,
+    }, headers=auth_headers)
+    assert r.status_code == 200
+    assert r.json()["description"] is None, f"description 应被清空: {r.text}"
+
+    r = client.get(f"/api/question-banks/{bank_id}", headers=auth_headers)
+    assert r.json()["description"] is None
+    client.delete(f"/api/question-banks/{bank_id}", headers=auth_headers)
