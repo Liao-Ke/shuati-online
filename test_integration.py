@@ -795,6 +795,40 @@ def test_25a_review_stats_ignore_deleted_questions(client, auth_headers):
     assert client.get("/api/review/stats", headers=auth_headers).json() == baseline
 
 
+def test_25b_review_record_not_inherited_by_reused_id(client, auth_headers):
+    """SQLite 会复用已删除题目的主键，新题目不能继承旧题目的背题状态（issue #84）"""
+    baseline = client.get("/api/review/stats", headers=auth_headers).json()
+    suffix = uuid.uuid4().hex[:8]
+    r = client.post("/api/question-banks/import", json={
+        "title": f"主键复用_{suffix}", "description": "",
+        "questions": [{"type": "judge", "content": "旧题，会被删除", "answer": "对"}],
+    }, headers=auth_headers)
+    assert r.status_code == 201
+    bank_id = r.json()["id"]
+    old_qid = client.get(f"/api/question-banks/{bank_id}", headers=auth_headers).json()["questions"][0]["id"]
+
+    r = client.post("/api/review/mark", json={
+        "question_id": old_qid, "status": "known",
+    }, headers=auth_headers)
+    assert r.status_code == 200
+    assert client.delete(f"/api/questions/{old_qid}", headers=auth_headers).status_code == 204
+
+    # 删除后新增的题目可能拿到与旧题相同的 id
+    r = client.post(f"/api/question-banks/{bank_id}/questions", json={
+        "type": "judge", "content": "新题，从未标记过", "answer": "错",
+    }, headers=auth_headers)
+    assert r.status_code == 201
+
+    questions = client.post("/api/review/questions", json={
+        "bank_ids": [bank_id],
+    }, headers=auth_headers).json()
+    assert len(questions) == 1
+    assert questions[0]["review_status"] is None
+    assert client.get("/api/review/stats", headers=auth_headers).json() == baseline
+
+    assert client.delete(f"/api/question-banks/{bank_id}", headers=auth_headers).status_code == 204
+
+
 def test_26_filter_reviewing_only(client, auth_headers):
     r = client.post("/api/review/mark", json={
         "question_id": state._review_first_qid, "status": "known",

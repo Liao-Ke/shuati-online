@@ -151,7 +151,8 @@ POST /api/review/mark       ─→ Upsert ReviewRecord
                                review_count + 1
                              ─→ 返回最新统计
 
-GET /api/review/stats       ─→ 汇总 known / reviewing 数量
+GET /api/review/stats       ─→ JOIN Question / QuestionBank
+                               只汇总仍存在题目的 known / reviewing 数量
 ```
 
 ### 4.3 错题收集流程
