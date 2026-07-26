@@ -129,8 +129,9 @@ def update_question(
 
     new_type = data.type if data.type is not None else question.type
     new_content = data.content if data.content is not None else question.content
-    new_chapter = data.chapter if data.chapter is not None else question.chapter
-    new_analysis = data.analysis if data.analysis is not None else question.analysis
+    # 可选字段以 model_fields_set 区分「未传」与「显式 null」：显式 null 表示清空（issue #112）
+    new_chapter = data.chapter if "chapter" in data.model_fields_set else question.chapter
+    new_analysis = data.analysis if "analysis" in data.model_fields_set else question.analysis
 
     if new_type in ("fill", "judge"):
         new_options = None
