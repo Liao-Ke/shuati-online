@@ -512,6 +512,8 @@ router.add('/exam', async () => {
   examElapsedOffset = parseInt(sessionStorage.getItem('examElapsedOffset')) || 0;
   if (examTimerMode === 'elapsed') startElapsedTimer();
   examProgress = await api.getExamProgress(examId);
+  // 刷新恢复时同步题目总数，否则 navigateExam 的边界判断恒 return（issue #110）
+  examTotalCount = examProgress.total_count;
   if (examCurrentIndex >= examProgress.total_count) examCurrentIndex = 0;
   renderQuestionGrid();
   if (examFullPreview) {
@@ -1619,7 +1621,8 @@ async function renderFullPreview() {
             if (letter === q.answer) cls += ' preview-option-correct';
             else if (letter === q.user_answer) cls += ' preview-option-wrong';
           }
-          optionsHtml += `<div class="${cls}" onclick="submitInlineChoice(${examId}, ${q.id}, ${q.index}, '${letter}')" ${q.is_answered ? '' : 'style="cursor:pointer"'}>${letter}. ${escHtml(opt)}</div>`;
+          // issue #113：已作答题选项为纯展示，不绑定点击事件，与判断题/多选题分支一致
+          optionsHtml += `<div class="${cls}" ${q.is_answered ? '' : `onclick="submitInlineChoice(${examId}, ${q.id}, ${q.index}, '${letter}')" style="cursor:pointer"`}>${letter}. ${escHtml(opt)}</div>`;
         });
       } else if (q.type === 'judge') {
         if (q.is_answered) {
