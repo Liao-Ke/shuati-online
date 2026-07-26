@@ -110,7 +110,8 @@ def start_exam(data: ExamStart, user: User = Depends(get_current_user), db: Sess
 
     exam = ExamRecord(
         user_id=user.id,
-        bank_ids=json.dumps(data.bank_ids),
+        # 只存已通过归属校验的题库 id，防止把他人题库 id 写进快照（issue #125）
+        bank_ids=json.dumps([b.id for b in banks]),
         mode=data.mode,
         question_count=len(selected),
         question_ids=json.dumps(question_ids),
