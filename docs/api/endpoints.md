@@ -194,6 +194,8 @@
 
 ### DELETE /api/question-banks/:id
 
+删除题库及其下全部题目，题目关联的背题记录一并级联删除。
+
 **响应：** 204 No Content
 
 **错误：** 404 — 题库不存在
@@ -318,7 +320,7 @@
 
 ### DELETE /api/questions/:id
 
-删除一道题目。已关联的答题记录和背题记录不受影响（历史详情中不展示已删除题目）。
+删除一道题目。关联的背题记录（`review_records`）一并级联删除，背题统计随之回落；答题记录保留、`question_id` 置空，历史详情中不展示已删除题目。
 
 **响应：** 204 No Content
 
@@ -705,7 +707,7 @@
 
 `status` 可选 `"known"`（已掌握）或 `"reviewing"`（待复习）。
 
-**响应 (200)：**
+**响应 (200)：** 与 `GET /api/review/stats` 同口径的最新统计。
 ```json
 {
   "known_count": 5,
@@ -726,6 +728,8 @@
   "total_reviewed": 8
 }
 ```
+
+统计只计入当前用户仍存在的题目：删除题目或题库后，对应计数会回落（issue #84）。`total_reviewed` 为两者之和。
 
 ---
 

@@ -118,12 +118,14 @@
 |------|------|------|--------|------|
 | `id` | Integer | PK, AUTO INCREMENT | | 记录 ID |
 | `user_id` | Integer | FK → users.id, NOT NULL | | 用户 |
-| `question_id` | Integer | FK → questions.id, NOT NULL | | 题目 |
+| `question_id` | Integer | FK → questions.id, NOT NULL | | 题目 ID（题目删除时本记录级联删除） |
 | `status` | String(20) | | `reviewing` | `known`（已掌握）或 `reviewing`（待复习） |
 | `reviewed_at` | DateTime | | `utcnow()` | 最近标记时间 |
 | `review_count` | Integer | | 1 | 累计标记次数 |
 
 **唯一约束：** `(user_id, question_id)` 联合唯一 (`uq_user_question_review`)。
+
+**级联：** 删除 `Question` 时本表记录随之删除，见下文「题目删除时关联记录的两种策略」。
 
 ---
 
@@ -140,6 +142,19 @@ SQLite 3.38+ 支持 `JSON` 数据类型，但为保持与更广泛版本的兼�
 ### UTC naive datetime 策略
 
 所有时间字段使用 `datetime.now(timezone.utc).replace(tzinfo=None)` 生成。SQLite 默认不存储时区信息，统一使用 UTC naive datetime 避免时区混乱。前端展示时由 JS 转换为本地时间。
+
+### 题目删除时关联记录的两种策略
+
+两张引用 `questions.id` 的表刻意采用了相反的策略：
+
+| 表 | 策略 | 理由 |
+|------|------|------|
+| `answer_records` | `question_id` 置空保留 | 属于历史答卷，题目删除后成绩单仍需可查，留痕优先 |
+| `review_records` | 级联删除 | 表达的是「当前掌握状态」，题目不存在时该状态没有任何含义 |
+
+`review_records` 必须真删而不能只在查询时过滤：SQLite 的 `INTEGER PRIMARY KEY` 没有 `AUTOINCREMENT`，新行取 `max(rowid) + 1`，**删除最大 id 的题目后新增题目会复用该 id**。残留记录会被这道全新题目继承，表现为从未标记过的题目直接显示「已掌握」，且查询期过滤对此完全无效（题目此时是存在的）。级联在 ORM 层实现（`Question.review_records` 的 `cascade="all, delete-orphan"`），删除题库时经由 `QuestionBank.questions` 逐级触发。
+
+存量孤儿记录由 migration `afa1757b2ecd` 一次性清理，该迁移不可回滚（无备份）。
 
 ### 唯一索引选择
 

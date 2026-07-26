@@ -59,7 +59,13 @@ class Question(Base):
     sort_order = Column(Integer, default=0)
 
     question_bank = relationship("QuestionBank", back_populates="questions")
+    # 答题记录属于历史答卷，题目删除后置空 question_id 保留留痕
     answer_records = relationship("AnswerRecord", back_populates="question")
+    # 背题记录表达「当前掌握状态」，题目删除后即失去意义，必须级联删除：
+    # SQLite 的 INTEGER PRIMARY KEY 会复用已删除行的 id，残留记录会被新题目继承（issue #84）
+    review_records = relationship(
+        "ReviewRecord", back_populates="question", cascade="all, delete-orphan",
+    )
 
 
 class ExamRecord(Base):
@@ -109,7 +115,7 @@ class ReviewRecord(Base):
     review_count = Column(Integer, default=1)
 
     user = relationship("User")
-    question = relationship("Question")
+    question = relationship("Question", back_populates="review_records")
 
     __table_args__ = (
         UniqueConstraint("user_id", "question_id", name="uq_user_question_review"),
