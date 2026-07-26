@@ -1619,7 +1619,8 @@ async function renderFullPreview() {
             if (letter === q.answer) cls += ' preview-option-correct';
             else if (letter === q.user_answer) cls += ' preview-option-wrong';
           }
-          optionsHtml += `<div class="${cls}" onclick="submitInlineChoice(${examId}, ${q.id}, ${q.index}, '${letter}')" ${q.is_answered ? '' : 'style="cursor:pointer"'}>${letter}. ${escHtml(opt)}</div>`;
+          // issue #113：已作答题选项为纯展示，不绑定点击事件，与判断题/多选题分支一致
+          optionsHtml += `<div class="${cls}" ${q.is_answered ? '' : `onclick="submitInlineChoice(${examId}, ${q.id}, ${q.index}, '${letter}')" style="cursor:pointer"`}>${letter}. ${escHtml(opt)}</div>`;
         });
       } else if (q.type === 'judge') {
         if (q.is_answered) {
