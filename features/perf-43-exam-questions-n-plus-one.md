@@ -3,7 +3,7 @@
 ## 关联
 
 - GitHub Issue: #43
-- 分支: `main`（直接提交）
+- 分支: `perf/43-exam-questions-n-plus-one`（PR #124）
 
 ## 问题
 
@@ -21,7 +21,7 @@
 
 **题序保持**：随机模式的 `random.Random(exam.id).shuffle` 结果依赖输入列表顺序。旧实现的输入顺序是「题库按 id 升序 × 题库内题目按 rowid 升序」（SQLite 隐式顺序），新实现在 shuffle 前显式按 `(bank_id, id)` 排序复现该顺序——把原本依赖隐式行为的顺序变为显式保证，进行中的随机模式考试题序不变。顺序模式排序键 `(bank_id, sort_order, id)` 不变。
 
-### `test_integration.py`（新增 3 个测试）
+### `test_integration.py`（新增 4 个测试）
 
 - `test_43a`：SQLAlchemy `before_cursor_execute` 事件统计 SELECT 数，断言 2 库与 5 库考试的 `current`/`progress`/`preview` 查询次数相等（不随题库数线性增长）。
 - `test_43b`：随机模式题序等于「(bank_id, id) 升序列表 + exam_id 种子 shuffle」，且两次请求间稳定——锁定与旧实现一致的题序口径。
