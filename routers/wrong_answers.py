@@ -6,7 +6,7 @@ from sqlalchemy.orm import Session, joinedload
 
 from auth import get_current_user
 from database import get_db
-from models import AnswerRecord, ExamRecord, Question, User
+from models import AnswerRecord, ExamRecord, Question, QuestionBank, User
 from schemas import WrongAnswerStartRequest
 from utils import parse_answer, parse_json_field
 
@@ -56,10 +56,12 @@ def list_wrong(user: User = Depends(get_current_user), db: Session = Depends(get
 
     # 按 answered_at 降序排列
     id_order = {qid: i for i, qid in enumerate(wrong_ids)}
+    # 归属复核：错题 id 可能因 rowid 复用指向他人题目，只取仍归属本人的题（issue #123 纵深防御）
     questions = (
         db.query(Question)
+        .join(QuestionBank)
         .options(joinedload(Question.question_bank))
-        .filter(Question.id.in_(wrong_ids))
+        .filter(Question.id.in_(wrong_ids), QuestionBank.user_id == user.id)
         .all()
     )
     questions.sort(key=lambda q: id_order.get(q.id, 9999))
@@ -124,7 +126,8 @@ def start_wrong_answer_practice(
 
     questions = (
         db.query(Question)
-        .filter(Question.id.in_(wrong_ids))
+        .join(QuestionBank)
+        .filter(Question.id.in_(wrong_ids), QuestionBank.user_id == user.id)
         .all()
     )
 

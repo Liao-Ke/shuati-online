@@ -54,7 +54,12 @@ def _serialize_question(q: Question, hide_answer: bool = True) -> QuestionOut:
 
 def _load_all_exam_questions(exam: ExamRecord, db: Session) -> tuple[list[Question], dict[int, AnswerRecord]]:
     bank_ids = parse_json_field(exam.bank_ids)
-    banks = db.query(QuestionBank).filter(QuestionBank.id.in_(bank_ids)).all()
+    # SQLite 主键会被复用（issue #84），快照里的题库 id 可能已指向他人重建的题库，
+    # 取题时必须复核归属，否则跨用户泄露题目（issue #123）
+    banks = db.query(QuestionBank).filter(
+        QuestionBank.id.in_(bank_ids),
+        QuestionBank.user_id == exam.user_id,
+    ).all()
     all_questions = []
     for bank in banks:
         all_questions.extend(bank.questions)
@@ -231,7 +236,12 @@ def submit_answer(
     if existing:
         raise HTTPException(status_code=400, detail="该题目已作答，不可重复提交")
 
-    question = db.query(Question).filter(Question.id == data.question_id).first()
+    # 复核题库归属：快照 id 可能因 SQLite rowid 复用（issue #84）指向他人题目，
+    # 且本路径会回显 correct_answer/analysis，泄露面比读路径更大（issue #123）
+    question = db.query(Question).join(QuestionBank).filter(
+        Question.id == data.question_id,
+        QuestionBank.user_id == exam.user_id,
+    ).first()
     if not question:
         raise HTTPException(status_code=404, detail="题目不存在")
 
@@ -413,7 +423,12 @@ def exam_result(exam_id: int, user: User = Depends(get_current_user), db: Sessio
     question_ids = [a.question_id for a in answers if a.question_id is not None]
     questions_map = {}
     if question_ids:
-        for q in db.query(Question).filter(Question.id.in_(question_ids)).all():
+        # 归属复核：即便有答题记录残留指向被复用 id 的他人题目，也不回显（issue #123 纵深防御）
+        rows = db.query(Question).join(QuestionBank).filter(
+            Question.id.in_(question_ids),
+            QuestionBank.user_id == exam.user_id,
+        ).all()
+        for q in rows:
             questions_map[q.id] = q
 
     result_answers = []

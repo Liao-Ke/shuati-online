@@ -2137,3 +2137,146 @@ def test_82c_non_fill_blank_count_is_none(client, auth_headers):
     exam_id = r.json()["exam_id"]
     q = client.get(f"/api/exam/{exam_id}/current", headers=auth_headers).json()["question"]
     assert q["blank_count"] is None
+
+
+# ── Test: 考试取题题库归属校验（issue #123）──
+
+
+def test_123a_preview_not_leak_reused_bank_of_other_user(client, auth_headers):
+    """题库删除后 id 被他人新题库复用，回看已完成考试不得读到他人题目（issue #123）"""
+    suffix = uuid.uuid4().hex[:8]
+    # 攻击者 A：导入题库并开考后立即结束（#19 的删除保护只拦 in_progress），再删库释放 id
+    r = client.post("/api/question-banks/import", json={
+        "title": f"A自删题库_{suffix}", "description": "",
+        "questions": [{"type": "judge", "content": "A的旧题", "answer": "对"}],
+    }, headers=auth_headers)
+    assert r.status_code == 201
+    bank_id = r.json()["id"]
+    old_qid = client.get(f"/api/question-banks/{bank_id}", headers=auth_headers).json()["questions"][0]["id"]
+
+    r = client.post("/api/exam/start", json={
+        "bank_ids": [bank_id], "mode": "sequential",
+    }, headers=auth_headers)
+    assert r.status_code == 200, r.text
+    exam_id = r.json()["exam_id"]
+    assert client.post(f"/api/exam/{exam_id}/finish", headers=auth_headers).status_code == 200
+    assert client.delete(f"/api/question-banks/{bank_id}", headers=auth_headers).status_code == 204
+
+    # 受害者 B：新用户导入题库，题库 id 与题目 id 均复用 A 刚释放的 rowid
+    r = client.post("/api/auth/register", json={"username": f"victim_{suffix}", "password": "123456"})
+    assert r.status_code == 200
+    victim_headers = {"Authorization": f"Bearer {r.json()['access_token']}"}
+    r = client.post("/api/question-banks/import", json={
+        "title": f"B机密题库_{suffix}", "description": "",
+        "questions": [{"type": "judge", "content": f"B机密题_{suffix}", "answer": "对"}],
+    }, headers=victim_headers)
+    assert r.status_code == 201
+    assert r.json()["id"] == bank_id, "前提不成立：题库 id 未被复用，测试未覆盖目标场景"
+    reused_qid = client.get(f"/api/question-banks/{bank_id}", headers=victim_headers).json()["questions"][0]["id"]
+    assert reused_qid == old_qid, "前提不成立：题目 id 未被复用，测试未覆盖目标场景"
+
+    # A 回看考试：快照里的 id 已指向 B 的题库，归属校验后不得返回任何题目
+    r = client.get(f"/api/exam/{exam_id}/preview", headers=auth_headers)
+    assert r.status_code == 200
+    contents = [q["content"] for q in r.json()["questions"]]
+    assert f"B机密题_{suffix}" not in contents, "跨用户泄露：读到了 B 的题目内容"
+    assert r.json()["total_count"] == 0
+
+    assert client.delete(f"/api/question-banks/{bank_id}", headers=victim_headers).status_code == 204
+
+
+def _fabricate_exam(user_id, bank_id, question_id, status, with_wrong_answer=False):
+    """直接建库伪造「快照 id 指向他人题库」的状态。
+    此状态经 HTTP 只能靠删除守卫的 TOCTOU 竞态达成（见 issue #123 安全审查），
+    伪造它以确定性地回归验证归属校验，而非依赖赢得竞态。"""
+    import json as _json
+
+    from database import SessionLocal
+    from models import AnswerRecord, ExamRecord
+
+    db = SessionLocal()
+    try:
+        exam = ExamRecord(
+            user_id=user_id, bank_ids=_json.dumps([bank_id]), mode="sequential",
+            question_count=1, question_ids=_json.dumps([question_id]),
+            correct_count=0, wrong_count=1 if with_wrong_answer else 0, status=status,
+        )
+        db.add(exam)
+        db.commit()
+        db.refresh(exam)
+        if with_wrong_answer:
+            db.add(AnswerRecord(
+                exam_id=exam.id, question_id=question_id,
+                user_answer='"A"', is_correct=False, time_spent_seconds=1,
+            ))
+            db.commit()
+        return exam.id
+    finally:
+        db.close()
+
+
+def test_123b_submit_answer_rejects_foreign_bank_question(client, auth_headers):
+    """写入路径复核题库归属：快照含他人题目 id 时提交作答被拒，不回显答案（issue #123）"""
+    suffix = uuid.uuid4().hex[:8]
+    attacker_id = client.get("/api/auth/me", headers=auth_headers).json()["id"]
+
+    r = client.post("/api/auth/register", json={"username": f"victimw_{suffix}", "password": "123456"})
+    assert r.status_code == 200
+    victim_headers = {"Authorization": f"Bearer {r.json()['access_token']}"}
+    r = client.post("/api/question-banks/import", json={
+        "title": f"B写入机密_{suffix}", "description": "",
+        "questions": [{"type": "choice", "chapter": "机密章", "content": f"B写入机密题_{suffix}",
+                       "options": ["机密X", "机密Y"], "answer": "A"}],
+    }, headers=victim_headers)
+    assert r.status_code == 201
+    victim_bank = r.json()["id"]
+    victim_qid = client.get(f"/api/question-banks/{victim_bank}", headers=victim_headers).json()["questions"][0]["id"]
+
+    exam_id = _fabricate_exam(attacker_id, victim_bank, victim_qid, "in_progress")
+
+    r = client.post(f"/api/exam/{exam_id}/answer", json={
+        "exam_id": exam_id, "question_id": victim_qid, "user_answer": "A", "time_spent_seconds": 1,
+    }, headers=auth_headers)
+    assert r.status_code == 404, f"应拒绝他人题目，实际 {r.status_code}: {r.text}"
+    assert f"B写入机密题_{suffix}" not in r.text
+    body = r.json()
+    assert "correct_answer" not in body and "analysis" not in body
+
+    assert client.delete(f"/api/question-banks/{victim_bank}", headers=victim_headers).status_code == 204
+
+
+def test_123c_result_and_wrong_answers_do_not_leak_foreign_question(client, auth_headers):
+    """泄露汇点纵深防御：即使存在指向他人题目的答题记录，result/history/wrong-answers 均不泄露（issue #123）"""
+    suffix = uuid.uuid4().hex[:8]
+    attacker_id = client.get("/api/auth/me", headers=auth_headers).json()["id"]
+
+    r = client.post("/api/auth/register", json={"username": f"victims_{suffix}", "password": "123456"})
+    assert r.status_code == 200
+    victim_headers = {"Authorization": f"Bearer {r.json()['access_token']}"}
+    r = client.post("/api/question-banks/import", json={
+        "title": f"B汇点机密_{suffix}", "description": "",
+        "questions": [{"type": "choice", "chapter": "机密章", "content": f"B汇点机密题_{suffix}",
+                       "options": ["机密X", "机密Y"], "answer": "A"}],
+    }, headers=victim_headers)
+    assert r.status_code == 201
+    victim_bank = r.json()["id"]
+    victim_qid = client.get(f"/api/question-banks/{victim_bank}", headers=victim_headers).json()["questions"][0]["id"]
+
+    exam_id = _fabricate_exam(attacker_id, victim_bank, victim_qid, "completed", with_wrong_answer=True)
+    secret = f"B汇点机密题_{suffix}"
+
+    result = client.get(f"/api/exam/{exam_id}/result", headers=auth_headers)
+    assert result.status_code == 200
+    assert secret not in result.text, "result 泄露了他人题目"
+    assert all(a["content"] != secret for a in result.json()["answers"])
+
+    history = client.get(f"/api/history/{exam_id}", headers=auth_headers)
+    assert history.status_code == 200
+    assert secret not in history.text, "history 泄露了他人题目"
+
+    wrong = client.get("/api/wrong-answers", headers=auth_headers)
+    assert wrong.status_code == 200
+    assert secret not in wrong.text, "wrong-answers 泄露了他人题目"
+    assert all(q["question_id"] != victim_qid for q in wrong.json())
+
+    assert client.delete(f"/api/question-banks/{victim_bank}", headers=victim_headers).status_code == 204
