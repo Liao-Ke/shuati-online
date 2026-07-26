@@ -1036,7 +1036,13 @@ function renderReviewPage() {
         return `<div class="${cls}">${i === 0 ? 'A' : 'B'}. ${v}</div>`;
       }).join('');
     }
-    const correctDisplay = q.answer || '';
+    // 多选/多空的 answer 是 DB 里的 JSON 数组原文，转成 "A, B" 可读格式，
+    // 与结果页/回看页 formatAnswerText 口径一致（issue #159）
+    let correctDisplay = q.answer || '';
+    try {
+      const parsed = JSON.parse(correctDisplay);
+      if (Array.isArray(parsed)) correctDisplay = formatAnswerText(parsed);
+    } catch { /* choice/judge/单空 fill 不是 JSON，原样展示 */ }
     const analysisDisplay = q.analysis ? `<div class="review-analysis mt-2">解析：${escHtml(q.analysis)}</div>` : '';
     html += `
       <div class="review-question-card card mb-3" data-id="${q.id}">
