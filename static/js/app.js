@@ -1181,16 +1181,15 @@ function logout() {
   router.navigate('/login');
 }
 
+// 后端 /current 已返回真实数组（issue #111），不再需要解析 Python repr 字符串
 function parseAnswerArray(val) {
-  if (!val) return [];
-  const s = String(val);
-  if (s.startsWith('[')) {
-    try {
-      const parsed = JSON.parse(s.replace(/'/g, '"'));
-      if (Array.isArray(parsed)) return parsed.map(String);
-    } catch {}
-  }
-  return [s];
+  if (Array.isArray(val)) return val.map(String);
+  return val ? [String(val)] : [];
+}
+
+// 数组答案展示为 "A, B" 可读格式，与结果页/历史详情一致（issue #111）
+function formatAnswerText(val) {
+  return Array.isArray(val) ? val.join(', ') : val;
 }
 
 function renderOptions(options, userAnswer, correctAnswer) {
@@ -1365,8 +1364,8 @@ async function loadQuestionByIndex(index) {
           ${answeredOptionsHtml}
           <div class="feedback ${feedbackClass}">
             <h3>${icon} ${data.is_correct ? '回答正确！' : '回答错误'}</h3>
-            <p class="mb-1">你的答案: <strong class="${data.is_correct ? 'text-success' : 'text-danger'}">${escHtml(data.user_answer || '(未作答)')}</strong></p>
-            <p class="mb-1">正确答案: <strong>${escHtml(data.correct_answer)}</strong></p>
+            <p class="mb-1">你的答案: <strong class="${data.is_correct ? 'text-success' : 'text-danger'}">${escHtml(formatAnswerText(data.user_answer) || '(未作答)')}</strong></p>
+            <p class="mb-1">正确答案: <strong>${escHtml(formatAnswerText(data.correct_answer))}</strong></p>
             ${q.analysis ? `<div class="analysis-box">📖 ${escHtml(q.analysis)}</div>` : ''}
           </div>
         </div>

@@ -132,9 +132,9 @@ def current_question(
         return ExamCurrent(
             exam_id=exam.id, current_index=index + 1, total_count=exam.question_count,
             question=q_out, is_answered=is_answered,
-            user_answer=str(user_answer_display) if user_answer_display else None,
+            user_answer=user_answer_display or None,
             is_correct=record.is_correct if record else None,
-            correct_answer=str(correct_answer) if correct_answer else None,
+            correct_answer=correct_answer or None,
         )
 
     remaining = [q for q in all_questions if q.id not in answered_map]
