@@ -5,7 +5,7 @@ import zlib
 
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy import func
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, selectinload
 
 from auth import get_current_user
 from database import get_db
@@ -54,16 +54,28 @@ def _serialize_question(q: Question, hide_answer: bool = True) -> QuestionOut:
 
 def _load_all_exam_questions(exam: ExamRecord, db: Session) -> tuple[list[Question], dict[int, AnswerRecord]]:
     bank_ids = parse_json_field(exam.bank_ids)
-    banks = db.query(QuestionBank).filter(QuestionBank.id.in_(bank_ids)).all()
-    all_questions = []
-    for bank in banks:
-        all_questions.extend(bank.questions)
-
     if exam.question_ids:
-        selected_ids = set(parse_json_field(exam.question_ids))
-        all_questions = [q for q in all_questions if q.id in selected_ids]
+        # 按开考时的 question_ids 快照一次查回全部题目，避免逐题库懒加载的 1+N（issue #43）。
+        # bank_id 过滤保持旧实现语义（题目必须仍在本场考试的题库范围内），它不是归属校验：
+        # exam.bank_ids 来自用户请求且未做归属过滤，题库归属校验缺口见 issue #123。
+        selected_ids = parse_json_field(exam.question_ids)
+        if not isinstance(selected_ids, list):
+            # 快照损坏（无法解析为列表）时保持旧实现的降级口径：按空集过滤返回空考试，而非 500
+            selected_ids = []
+        all_questions = db.query(Question).filter(
+            Question.id.in_(selected_ids), Question.bank_id.in_(bank_ids)
+        ).all()
+    else:
+        # 兼容 issue #22 之前没有 question_ids 快照的历史考试，selectinload 一次批量加载
+        banks = db.query(QuestionBank).options(selectinload(QuestionBank.questions)).filter(
+            QuestionBank.id.in_(bank_ids)
+        ).all()
+        all_questions = [q for bank in banks for q in bank.questions]
 
     if exam.mode == "random":
+        # shuffle 结果依赖输入顺序：先按 (bank_id, id) 复现旧实现「逐题库追加」的列表顺序，
+        # 保证进行中的随机模式考试题序不变
+        all_questions.sort(key=lambda q: (q.bank_id or 0, q.id or 0))
         random.Random(exam.id).shuffle(all_questions)
     else:
         all_questions.sort(key=lambda q: (q.bank_id or 0, q.sort_order or 0, q.id or 0))
