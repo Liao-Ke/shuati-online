@@ -10,12 +10,27 @@ from sqlalchemy.orm import Session
 from auth import get_current_user
 from database import get_db
 from models import AnswerRecord, ExamRecord, Question, QuestionBank, User, utcnow
-from schemas import AnswerResult, AnswerSubmit, ExamCurrent, ExamProgress, ExamResult, ExamStart, QuestionOut
+from schemas import (
+    AnswerResult,
+    AnswerSubmit,
+    ExamCurrent,
+    ExamFinish,
+    ExamProgress,
+    ExamResult,
+    ExamStart,
+    QuestionOut,
+)
 from utils import parse_answer, parse_json_field
 
 logger = logging.getLogger("shuati")
 
 router = APIRouter(prefix="/api/exam", tags=["答题"])
+
+
+def _elapsed_duration(exam: ExamRecord, elapsed_seconds: int | None) -> int:
+    """整卷计时总用时：优先前端计时器口径（不含暂停时长），墙钟差值封顶防伪造（issue #115）"""
+    wall = int((exam.finished_at - exam.started_at).total_seconds())
+    return min(elapsed_seconds, wall) if elapsed_seconds is not None else wall
 
 
 def _serialize_question(q: Question, hide_answer: bool = True) -> QuestionOut:
@@ -289,7 +304,7 @@ def submit_answer(
         exam.status = "completed"
         exam.finished_at = utcnow()
         if exam.timer_mode == "elapsed" and exam.started_at and exam.finished_at:
-            exam.duration_seconds = int((exam.finished_at - exam.started_at).total_seconds())
+            exam.duration_seconds = _elapsed_duration(exam, data.elapsed_seconds)
         db.commit()
 
     correct_display = correct_answer
@@ -346,6 +361,7 @@ def exam_preview(
 @router.post("/{exam_id}/finish")
 def finish_exam(
     exam_id: int,
+    data: ExamFinish | None = None,
     user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
@@ -364,7 +380,7 @@ def finish_exam(
     exam.status = "completed"
     exam.finished_at = utcnow()
     if exam.timer_mode == "elapsed" and exam.started_at and exam.finished_at:
-        exam.duration_seconds = int((exam.finished_at - exam.started_at).total_seconds())
+        exam.duration_seconds = _elapsed_duration(exam, data.elapsed_seconds if data else None)
     db.commit()
     logger.info(f"用户 {user.id} 完成考试，exam_id={exam.id}")
     return {"exam_id": exam.id, "status": "completed"}

@@ -450,9 +450,12 @@
   "exam_id": 42,
   "question_id": 7,
   "user_answer": "B",
-  "time_spent_seconds": 15
+  "time_spent_seconds": 15,
+  "elapsed_seconds": 120
 }
 ```
+
+`elapsed_seconds` 可选（≥0）：整卷计时模式下前端计时器口径的已用秒数（不含暂停时长）。仅在本次提交完成最后一题、练习自动结束时生效，作为 `duration_seconds` 采用值，并以 `finished_at - started_at` 墙钟差值封顶；不传则回退墙钟差值（issue #115）。
 
 `user_answer` 规则：
 - 选择题：选项字母字符串（如 `"B"`）
@@ -525,6 +528,13 @@
 ### POST /api/exam/:id/finish
 
 手动结束练习。如已结束则幂等返回。
+
+**请求体（可选）：**
+```json
+{ "elapsed_seconds": 120 }
+```
+
+`elapsed_seconds` 可选（≥0）：整卷计时模式下前端计时器口径的已用秒数（不含暂停时长），作为 `duration_seconds` 采用值，并以墙钟差值封顶；不传或传 `{}` 则回退墙钟差值（issue #115）。
 
 **响应 (200)：**
 ```json

@@ -1960,3 +1960,87 @@ def test_80_update_bank_description_null_clears_omitted_keeps(client, auth_heade
     r = client.get(f"/api/question-banks/{bank_id}", headers=auth_headers)
     assert r.json()["description"] is None
     client.delete(f"/api/question-banks/{bank_id}", headers=auth_headers)
+
+
+# ── issue #115: 整卷计时暂停时长不计入总用时 ──
+
+
+def _start_elapsed_exam(client, auth_headers):
+    r = client.post("/api/exam/start", json={
+        "bank_ids": [state.bank_id], "mode": "sequential",
+        "types": ["choice", "fill", "judge", "multiple"],
+        "choice_timeout": 30, "judge_fill_timeout": 60,
+        "timer_mode": "elapsed",
+    }, headers=auth_headers)
+    assert r.status_code == 200, r.text
+    return r.json()["exam_id"]
+
+
+def _backdate_exam_start(exam_id: int, seconds: int):
+    """把 started_at 回拨，模拟真实作答经过的墙钟时间"""
+    from database import SessionLocal
+    from models import ExamRecord, utcnow
+
+    db = SessionLocal()
+    try:
+        exam = db.query(ExamRecord).filter(ExamRecord.id == exam_id).first()
+        exam.started_at = utcnow() - timedelta(seconds=seconds)
+        db.commit()
+    finally:
+        db.close()
+
+
+def test_115a_finish_elapsed_uses_client_elapsed(client, auth_headers):
+    """整卷计时手动结束：duration 采用前端计时器口径（不含暂停），不再取墙钟差（issue #115）"""
+    exam_id = _start_elapsed_exam(client, auth_headers)
+    _backdate_exam_start(exam_id, 600)  # 墙钟已过 600s，其中含暂停时长
+    r = client.post(f"/api/exam/{exam_id}/finish", json={"elapsed_seconds": 120}, headers=auth_headers)
+    assert r.status_code == 200, r.text
+    duration = client.get(f"/api/exam/{exam_id}/result", headers=auth_headers).json()["duration_seconds"]
+    assert duration == 120, f"应采用前端上报的 120s，实际 {duration}"
+
+
+def test_115b_finish_elapsed_clamped_by_wall_clock(client, auth_headers):
+    """上报值超过墙钟差时按墙钟封顶，防止伪造超长用时（issue #115）"""
+    exam_id = _start_elapsed_exam(client, auth_headers)
+    r = client.post(f"/api/exam/{exam_id}/finish", json={"elapsed_seconds": 99999}, headers=auth_headers)
+    assert r.status_code == 200, r.text
+    duration = client.get(f"/api/exam/{exam_id}/result", headers=auth_headers).json()["duration_seconds"]
+    assert duration <= 5, f"上报值超出墙钟差应被封顶，实际 {duration}"
+
+
+def test_115c_finish_elapsed_fallback_wall_clock(client, auth_headers):
+    """不上报 elapsed_seconds（旧客户端）时回退墙钟差值，保持兼容"""
+    exam_id = _start_elapsed_exam(client, auth_headers)
+    _backdate_exam_start(exam_id, 100)
+    r = client.post(f"/api/exam/{exam_id}/finish", json={}, headers=auth_headers)
+    assert r.status_code == 200, r.text
+    duration = client.get(f"/api/exam/{exam_id}/result", headers=auth_headers).json()["duration_seconds"]
+    assert 98 <= duration <= 105, f"未上报时应为墙钟差约 100s，实际 {duration}"
+
+
+def test_115d_finish_rejects_negative_elapsed(client, auth_headers):
+    """负数 elapsed_seconds 应被 schema 校验拒绝"""
+    exam_id = _start_elapsed_exam(client, auth_headers)
+    r = client.post(f"/api/exam/{exam_id}/finish", json={"elapsed_seconds": -1}, headers=auth_headers)
+    assert r.status_code == 422, f"负数应返回 422: {r.status_code}"
+
+
+def test_115e_last_answer_uses_client_elapsed(client, auth_headers):
+    """提交最后一题自动结束路径同样采用前端口径的 elapsed_seconds（issue #115）"""
+    exam_id = _start_elapsed_exam(client, auth_headers)
+    _backdate_exam_start(exam_id, 600)
+    total = client.get(f"/api/exam/{exam_id}/current", headers=auth_headers).json()["total_count"]
+    for _ in range(total):
+        q = client.get(f"/api/exam/{exam_id}/current", headers=auth_headers).json()["question"]
+        ans = {"choice": "A", "judge": "对", "multiple": ["A"]}.get(q["type"], "x")
+        r = client.post(f"/api/exam/{exam_id}/answer", json={
+            "exam_id": exam_id, "question_id": q["id"],
+            "user_answer": ans, "time_spent_seconds": 1,
+            "elapsed_seconds": 45,
+        }, headers=auth_headers)
+        assert r.status_code == 200, r.text
+        if r.json()["is_last"]:
+            break
+    duration = client.get(f"/api/exam/{exam_id}/result", headers=auth_headers).json()["duration_seconds"]
+    assert duration == 45, f"自动结束应采用上报的 45s，实际 {duration}"
