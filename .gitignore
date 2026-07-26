@@ -1,5 +1,6 @@
 .superpowers/
 .codex/
+.claude/
 .pi/
 exam.db
 .secret_key
