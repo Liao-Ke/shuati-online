@@ -82,3 +82,70 @@ test('api request falls back to error field for non-429 responses', async () => 
 
   await assert.rejects(() => api.getBanks(), /自定义错误/);
 });
+
+// issue #157：网关 HTML 错误页/空 body 不是 JSON 时，request 不再抛 SyntaxError 原文，
+// 统一产生带状态码的可读错误，err.status 保持可用。
+
+test('api request maps non-JSON 502 error page to readable message with status', async () => {
+  const { api } = loadApi(async () => ({
+    ok: false,
+    status: 502,
+    async json() { throw new SyntaxError("Unexpected token '<'"); },
+  }));
+
+  await assert.rejects(
+    () => api.getBanks(),
+    (err) => {
+      assert.equal(err.message, '请求失败(502)');
+      assert.equal(err.status, 502);
+      return true;
+    },
+  );
+});
+
+test('api request maps empty-body 500 to readable message with status', async () => {
+  const { api } = loadApi(async () => ({
+    ok: false,
+    status: 500,
+    async json() { throw new SyntaxError('Unexpected end of JSON input'); },
+  }));
+
+  await assert.rejects(
+    () => api.getBanks(),
+    (err) => {
+      assert.equal(err.message, '请求失败(500)');
+      assert.equal(err.status, 500);
+      return true;
+    },
+  );
+});
+
+test('api request non-JSON 401 still triggers auth-expired handling', async () => {
+  const { api, events, storage } = loadApi(async () => ({
+    ok: false,
+    status: 401,
+    async json() { throw new SyntaxError("Unexpected token '<'"); },
+  }));
+  api.setToken('token');
+
+  await assert.rejects(() => api.getBanks(), /请求失败\(401\)/);
+  assert.equal(storage.get('token'), undefined);
+  assert.deepEqual(events, ['auth-expired']);
+});
+
+test('api request treats non-JSON body on 200 as parse failure with status', async () => {
+  const { api } = loadApi(async () => ({
+    ok: true,
+    status: 200,
+    async json() { throw new SyntaxError("Unexpected token '<'"); },
+  }));
+
+  await assert.rejects(
+    () => api.getBanks(),
+    (err) => {
+      assert.equal(err.message, '响应解析失败(200)');
+      assert.equal(err.status, 200);
+      return true;
+    },
+  );
+});
