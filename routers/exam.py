@@ -57,19 +57,23 @@ def _load_all_exam_questions(exam: ExamRecord, db: Session) -> tuple[list[Questi
     bank_ids = parse_json_field(exam.bank_ids)
     if exam.question_ids:
         # 按开考时的 question_ids 快照一次查回全部题目，避免逐题库懒加载的 1+N（issue #43）。
-        # bank_id 过滤保持旧实现语义（题目必须仍在本场考试的题库范围内），它不是归属校验：
-        # exam.bank_ids 来自用户请求且未做归属过滤，题库归属校验缺口见 issue #123。
+        # bank_id 过滤保持旧实现语义（题目必须仍在本场考试的题库范围内）；
+        # join 复核题库归属：SQLite 主键会被复用（issue #84），快照里的题库/题目 id
+        # 可能已指向他人重建的数据，不复核会跨用户泄露题目（issue #123）
         selected_ids = parse_json_field(exam.question_ids)
         if not isinstance(selected_ids, list):
             # 快照损坏（无法解析为列表）时保持旧实现的降级口径：按空集过滤返回空考试，而非 500
             selected_ids = []
-        all_questions = db.query(Question).filter(
-            Question.id.in_(selected_ids), Question.bank_id.in_(bank_ids)
+        all_questions = db.query(Question).join(QuestionBank).filter(
+            Question.id.in_(selected_ids), Question.bank_id.in_(bank_ids),
+            QuestionBank.user_id == exam.user_id,
         ).all()
     else:
-        # 兼容 issue #22 之前没有 question_ids 快照的历史考试，selectinload 一次批量加载
+        # 兼容 issue #22 之前没有 question_ids 快照的历史考试，selectinload 一次批量加载；
+        # 同样复核题库归属（issue #123）
         banks = db.query(QuestionBank).options(selectinload(QuestionBank.questions)).filter(
-            QuestionBank.id.in_(bank_ids)
+            QuestionBank.id.in_(bank_ids),
+            QuestionBank.user_id == exam.user_id,
         ).all()
         all_questions = [q for bank in banks for q in bank.questions]
 
@@ -279,7 +283,12 @@ def submit_answer(
     if existing:
         raise HTTPException(status_code=400, detail="该题目已作答，不可重复提交")
 
-    question = db.query(Question).filter(Question.id == data.question_id).first()
+    # 复核题库归属：快照 id 可能因 SQLite rowid 复用（issue #84）指向他人题目，
+    # 且本路径会回显 correct_answer/analysis，泄露面比读路径更大（issue #123）
+    question = db.query(Question).join(QuestionBank).filter(
+        Question.id == data.question_id,
+        QuestionBank.user_id == exam.user_id,
+    ).first()
     if not question:
         raise HTTPException(status_code=404, detail="题目不存在")
 
@@ -467,7 +476,12 @@ def exam_result(exam_id: int, user: User = Depends(get_current_user), db: Sessio
     question_ids = [a.question_id for a in answers if a.question_id is not None]
     questions_map = {}
     if question_ids:
-        for q in db.query(Question).filter(Question.id.in_(question_ids)).all():
+        # 归属复核：即便有答题记录残留指向被复用 id 的他人题目，也不回显（issue #123 纵深防御）
+        rows = db.query(Question).join(QuestionBank).filter(
+            Question.id.in_(question_ids),
+            QuestionBank.user_id == exam.user_id,
+        ).all()
+        for q in rows:
             questions_map[q.id] = q
 
     result_answers = []
