@@ -1401,20 +1401,16 @@ async function loadQuestionByIndex(index) {
         </div>
       `;
     } else if (q.type === 'fill') {
-      const answerRaw = q.answer;
-      try {
-        const parsed = JSON.parse(answerRaw);
-        if (Array.isArray(parsed) && parsed.length > 1) {
-          let multiHtml = '<div class="d-flex flex-wrap gap-2 mt-3 justify-content-center">';
-          parsed.forEach((_, i) => {
-            multiHtml += `<input type="text" class="form-control fill-input" style="width:120px;display:inline-block" data-idx="${i}" placeholder="空 ${i + 1}">`;
-          });
-          multiHtml += '</div>';
-          optionsHtml = multiHtml;
-        } else {
-          optionsHtml = `<input type="text" class="form-control form-control-lg mt-3" id="fill-answer" placeholder="请输入答案">`;
+      // 未作答时 answer 被隐藏，空位数量来自后端安全元数据 blank_count（issue #82）
+      const blanks = q.blank_count || 1;
+      if (blanks > 1) {
+        let multiHtml = '<div class="d-flex flex-wrap gap-2 mt-3 justify-content-center">';
+        for (let i = 0; i < blanks; i++) {
+          multiHtml += `<input type="text" class="form-control fill-input" style="width:120px;display:inline-block" data-idx="${i}" placeholder="空 ${i + 1}">`;
         }
-      } catch {
+        multiHtml += '</div>';
+        optionsHtml = multiHtml;
+      } else {
         optionsHtml = `<input type="text" class="form-control form-control-lg mt-3" id="fill-answer" placeholder="请输入答案">`;
       }
     }
@@ -1667,12 +1663,13 @@ async function renderFullPreview() {
           optionsHtml += `<button class="btn btn-primary btn-sm mt-2" onclick="submitInlineMulti(${examId}, ${q.id}, ${q.index})">提交</button>`;
         }
       } else if (q.type === 'fill' && !q.is_answered) {
-        const multi = Array.isArray(q.answer) && q.answer.length > 1;
-        if (multi) {
+        // 未作答时 answer 被隐藏，空位数量来自后端安全元数据 blank_count（issue #82）
+        const blanks = q.blank_count || 1;
+        if (blanks > 1) {
           optionsHtml = `<div class="d-flex flex-wrap gap-2 mt-2 justify-content-center">`;
-          q.answer.forEach((_, i) => {
+          for (let i = 0; i < blanks; i++) {
             optionsHtml += `<input type="text" class="form-control preview-fill-input" id="preview-fill-${q.id}-${i}" data-qid="${q.id}" data-idx="${i}" placeholder="空 ${i + 1}">`;
-          });
+          }
           optionsHtml += `</div><button class="btn btn-primary btn-sm mt-2" onclick="submitInlineFill(${examId}, ${q.id}, ${q.index})">提交</button>`;
         } else {
           optionsHtml = `<div class="d-flex gap-2 mt-2 justify-content-center"><input type="text" class="form-control preview-fill-input" id="preview-fill-${q.id}-0" data-qid="${q.id}" data-idx="0" placeholder="请输入答案"><button class="btn btn-primary btn-sm" onclick="submitInlineFill(${examId}, ${q.id}, ${q.index})">提交</button></div>`;

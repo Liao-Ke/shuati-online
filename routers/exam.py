@@ -33,6 +33,14 @@ def _elapsed_duration(exam: ExamRecord, elapsed_seconds: int | None) -> int:
     return min(elapsed_seconds, wall) if elapsed_seconds is not None else wall
 
 
+def _fill_blank_count(q: Question) -> int | None:
+    """填空题空位数量——不泄露答案内容的安全元数据，供前端渲染输入框（issue #82）"""
+    if q.type != "fill":
+        return None
+    parsed = parse_answer(q.answer, q.type)
+    return len(parsed) if isinstance(parsed, list) else 1
+
+
 def _serialize_question(q: Question, hide_answer: bool = True) -> QuestionOut:
     return QuestionOut(
         id=q.id, type=q.type, chapter=q.chapter, content=q.content,
@@ -40,6 +48,7 @@ def _serialize_question(q: Question, hide_answer: bool = True) -> QuestionOut:
         answer=None if hide_answer else q.answer,
         analysis=None if hide_answer else q.analysis,
         sort_order=q.sort_order,
+        blank_count=_fill_blank_count(q),
     )
 
 
@@ -354,6 +363,7 @@ def exam_preview(
             "user_answer": user_answer,
             "is_answered": is_answered,
             "is_correct": record.is_correct if record else None,
+            "blank_count": _fill_blank_count(q),
         })
     return {"total_count": len(questions), "questions": questions}
 
