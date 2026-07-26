@@ -2817,3 +2817,25 @@ def test_144_question_sampling_varies_across_exams(client, auth_headers):
 
     assert len(subsets) > 1, "8 次开考抽到的题目子集完全相同，抽样仍是确定性的"
     client.delete(f"/api/question-banks/{new_bank}", headers=auth_headers)
+
+
+def test_149_list_banks_question_count_aggregate(client):
+    """题库列表 question_count 改聚合计数后返回值不变：多题库各自计数准确，
+    0 题库（outerjoin 边界）计数为 0 且不丢行（issue #149）"""
+    headers = _register_isolated_user(client, "u149")
+    full_bank = _import_bank(client, headers, title="计数-5题")
+    r = client.post("/api/question-banks/import", json={
+        "title": "计数-0题", "questions": [{"type": "judge", "content": "临时题", "answer": "对"}],
+    }, headers=headers)
+    assert r.status_code == 201
+    empty_bank = r.json()["id"]
+    qid = client.get(f"/api/question-banks/{empty_bank}", headers=headers).json()["questions"][0]["id"]
+    assert client.delete(f"/api/questions/{qid}", headers=headers).status_code == 204
+
+    r = client.get("/api/question-banks", headers=headers)
+    assert r.status_code == 200
+    banks = r.json()
+    assert len(banks) == 2, "0 题库不应因聚合查询从列表中消失"
+    counts = {b["id"]: b["question_count"] for b in banks}
+    assert counts[full_bank] == 5
+    assert counts[empty_bank] == 0
