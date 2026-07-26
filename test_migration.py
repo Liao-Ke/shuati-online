@@ -13,7 +13,8 @@ import sys
 import pytest
 
 PROJECT_ROOT = os.path.dirname(os.path.abspath(__file__))
-PREV_REVISION = "afa1757b2ecd"
+# 3159d3fe4acc 的直接父版本（fc868b9a7b87 = issue #81 的答题快照列迁移）
+PREV_REVISION = "fc868b9a7b87"
 
 
 def _alembic(db_path: str, *args: str) -> subprocess.CompletedProcess:

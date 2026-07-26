@@ -1,3 +1,4 @@
+import json
 import time
 import uuid
 from datetime import UTC, datetime, timedelta
@@ -2138,6 +2139,410 @@ def test_82c_non_fill_blank_count_is_none(client, auth_headers):
     exam_id = r.json()["exam_id"]
     q = client.get(f"/api/exam/{exam_id}/current", headers=auth_headers).json()["question"]
     assert q["blank_count"] is None
+
+
+# ── Test: issue #43 考试主流程 _load_all_exam_questions 的 N+1 优化 ──
+
+
+def _import_bank_43(client, auth_headers, title):
+    r = client.post("/api/question-banks/import", json={**BANK_DATA, "title": title}, headers=auth_headers)
+    assert r.status_code == 201, r.text
+    return r.json()["id"]
+
+
+def _start_exam_43(client, auth_headers, bank_ids, mode="sequential"):
+    r = client.post("/api/exam/start", json={"bank_ids": bank_ids, "mode": mode}, headers=auth_headers)
+    assert r.status_code == 200, r.text
+    return r.json()["exam_id"]
+
+
+def _count_selects_43(fn):
+    """统计 fn 执行期间应用 engine 发出的 SELECT 语句数"""
+    from sqlalchemy import event
+
+    from database import engine
+
+    selects = []
+
+    def on_execute(conn, cursor, statement, parameters, context, executemany):
+        if statement.lstrip().upper().startswith("SELECT"):
+            selects.append(statement)
+
+    event.listen(engine, "before_cursor_execute", on_execute)
+    try:
+        fn()
+    finally:
+        event.remove(engine, "before_cursor_execute", on_execute)
+    return len(selects)
+
+
+def test_43a_exam_query_count_not_linear_in_bank_count(client, auth_headers):
+    """current/progress/preview 的查询次数不随题库数线性增长（issue #43）"""
+    suffix = uuid.uuid4().hex[:6]
+    small_banks = [_import_bank_43(client, auth_headers, f"n1题库{suffix}_{i}") for i in range(2)]
+    large_banks = [_import_bank_43(client, auth_headers, f"n1题库{suffix}_L{i}") for i in range(5)]
+    exam_small = _start_exam_43(client, auth_headers, small_banks)
+    exam_large = _start_exam_43(client, auth_headers, large_banks)
+
+    for path in ("current", "progress", "preview"):
+        responses = []
+        n_small = _count_selects_43(
+            lambda rs=responses, p=path: rs.append(client.get(f"/api/exam/{exam_small}/{p}", headers=auth_headers))
+        )
+        n_large = _count_selects_43(
+            lambda rs=responses, p=path: rs.append(client.get(f"/api/exam/{exam_large}/{p}", headers=auth_headers))
+        )
+        for r in responses:
+            assert r.status_code == 200, r.text
+        assert n_small == n_large, (
+            f"{path} 查询次数随题库数增长：2 库 {n_small} 次 vs 5 库 {n_large} 次"
+        )
+
+
+def test_43b_random_mode_order_unchanged(client, auth_headers):
+    """随机模式题序保持旧实现口径：(bank_id, id) 升序列表做 exam_id 种子 shuffle（issue #43）"""
+    import random as _random
+
+    suffix = uuid.uuid4().hex[:6]
+    bank_ids = [_import_bank_43(client, auth_headers, f"序题库{suffix}_{i}") for i in range(3)]
+
+    expected = []
+    for bid in sorted(bank_ids):
+        r = client.get(f"/api/question-banks/{bid}", headers=auth_headers)
+        assert r.status_code == 200, r.text
+        expected.extend(sorted(q["id"] for q in r.json()["questions"]))
+
+    exam_id = _start_exam_43(client, auth_headers, bank_ids, mode="random")
+    _random.Random(exam_id).shuffle(expected)
+
+    r = client.get(f"/api/exam/{exam_id}/preview", headers=auth_headers)
+    assert r.status_code == 200, r.text
+    got = [q["id"] for q in r.json()["questions"]]
+    assert got == expected, "随机模式题序与旧实现不一致"
+
+    r2 = client.get(f"/api/exam/{exam_id}/preview", headers=auth_headers)
+    assert [q["id"] for q in r2.json()["questions"]] == got, "随机模式题序在两次请求间不稳定"
+
+
+def _make_legacy_exam_43(client, auth_headers, n_banks, tag):
+    """构造 issue #22 之前的历史考试：开考后把 question_ids 快照置 NULL"""
+    from database import SessionLocal
+    from models import ExamRecord
+
+    bank_ids = [_import_bank_43(client, auth_headers, f"旧题库{tag}_{i}") for i in range(n_banks)]
+    exam_id = _start_exam_43(client, auth_headers, bank_ids)
+    db = SessionLocal()
+    try:
+        db.query(ExamRecord).filter(ExamRecord.id == exam_id).update({"question_ids": None})
+        db.commit()
+    finally:
+        db.close()
+    return exam_id
+
+
+def test_43c_legacy_exam_without_question_ids_snapshot(client, auth_headers):
+    """issue #22 之前的历史考试没有 question_ids 快照，回退批量加载且查询数不随题库数增长（issue #43）"""
+    suffix = uuid.uuid4().hex[:6]
+    exam_small = _make_legacy_exam_43(client, auth_headers, 2, f"{suffix}s")
+    exam_large = _make_legacy_exam_43(client, auth_headers, 5, f"{suffix}l")
+
+    responses = []
+    n_small = _count_selects_43(
+        lambda: responses.append(client.get(f"/api/exam/{exam_small}/preview", headers=auth_headers))
+    )
+    n_large = _count_selects_43(
+        lambda: responses.append(client.get(f"/api/exam/{exam_large}/preview", headers=auth_headers))
+    )
+    for r in responses:
+        assert r.status_code == 200, r.text
+    assert responses[0].json()["total_count"] == len(BANK_DATA["questions"]) * 2, "回退路径应返回全部题目"
+    assert responses[1].json()["total_count"] == len(BANK_DATA["questions"]) * 5, "回退路径应返回全部题目"
+    assert n_small == n_large, (
+        f"回退路径查询次数随题库数增长：2 库 {n_small} 次 vs 5 库 {n_large} 次"
+    )
+    r = client.get(f"/api/exam/{exam_small}/current", headers=auth_headers)
+    assert r.status_code == 200, r.text
+
+
+def test_43d_corrupt_question_ids_degrades_gracefully(client, auth_headers):
+    """question_ids 快照损坏时保持旧实现的降级口径：空考试而非 500（issue #43）"""
+    from database import SessionLocal
+    from models import ExamRecord
+
+    suffix = uuid.uuid4().hex[:6]
+    bank_ids = [_import_bank_43(client, auth_headers, f"损题库{suffix}")]
+    exam_id = _start_exam_43(client, auth_headers, bank_ids)
+    db = SessionLocal()
+    try:
+        # 模拟截断的 JSON：parse_json_field 解析失败会原样返回字符串
+        db.query(ExamRecord).filter(ExamRecord.id == exam_id).update({"question_ids": "[1, 2"})
+        db.commit()
+    finally:
+        db.close()
+
+    for path in ("preview", "current", "progress"):
+        r = client.get(f"/api/exam/{exam_id}/{path}", headers=auth_headers)
+        assert r.status_code == 200, f"{path} 应优雅降级而非 500: {r.text}"
+    r = client.get(f"/api/exam/{exam_id}/preview", headers=auth_headers)
+    assert r.json()["total_count"] == 0, "损坏快照按空集过滤，应返回空考试"
+
+
+# ── Test: 删除题库后历史详情保留答案明细（issue #81） ──
+
+
+def _81_setup_completed_exam(client, auth_headers):
+    """导入 2 题的题库并完成一场考试，返回 (bank_id, exam_id)"""
+    suffix = uuid.uuid4().hex[:8]
+    r = client.post("/api/question-banks/import", json={
+        "title": f"快照测试_{suffix}", "description": "",
+        "questions": [
+            {"type": "choice", "content": "快照选择题", "options": ["甲", "乙"],
+             "answer": "B", "analysis": "选乙的原因"},
+            {"type": "fill", "content": "快照____填空____", "answer": ["多", "空"]},
+        ],
+    }, headers=auth_headers)
+    assert r.status_code == 201, r.text
+    bank_id = r.json()["id"]
+    r = client.post("/api/exam/start", json={
+        "bank_ids": [bank_id], "mode": "sequential",
+    }, headers=auth_headers)
+    exam_id = r.json()["exam_id"]
+    for _ in range(2):
+        q = client.get(f"/api/exam/{exam_id}/current", headers=auth_headers).json()["question"]
+        user_answer = "A" if q["type"] == "choice" else ["多", "空"]
+        r = client.post(f"/api/exam/{exam_id}/answer", json={
+            "exam_id": exam_id, "question_id": q["id"],
+            "user_answer": user_answer, "time_spent_seconds": 3,
+        }, headers=auth_headers)
+        assert r.status_code == 200, r.text
+    return bank_id, exam_id
+
+
+def test_81a_history_detail_survives_bank_deletion(client, auth_headers):
+    """删除题库后，历史详情通过答题快照保留题目内容与答案明细"""
+    bank_id, exam_id = _81_setup_completed_exam(client, auth_headers)
+    before = client.get(f"/api/history/{exam_id}", headers=auth_headers).json()
+    assert before["total_count"] == 2
+    assert len(before["answers"]) == 2
+
+    r = client.delete(f"/api/question-banks/{bank_id}", headers=auth_headers)
+    assert r.status_code == 204
+
+    after = client.get(f"/api/history/{exam_id}", headers=auth_headers).json()
+    assert after["total_count"] == 2
+    assert len(after["answers"]) == 2, "删除题库后明细数不应少于汇总数"
+    choice = next(a for a in after["answers"] if a["type"] == "choice")
+    assert choice["content"] == "快照选择题"
+    assert choice["options"] == ["甲", "乙"]
+    assert choice["correct_answer"] == "B"
+    assert choice["user_answer"] == "A"
+    assert choice["is_correct"] is False
+    assert choice["analysis"] == "选乙的原因"
+    assert choice["question_deleted"] is True
+    fill = next(a for a in after["answers"] if a["type"] == "fill")
+    assert fill["correct_answer"] == ["多", "空"]
+    assert fill["is_correct"] is True
+
+
+def test_81b_orphan_answer_without_snapshot_shows_placeholder(client, auth_headers):
+    """无快照的历史孤儿记录（快照功能上线前的旧数据）显示占位而非静默跳过"""
+    bank_id, exam_id = _81_setup_completed_exam(client, auth_headers)
+    from database import SessionLocal
+    from models import AnswerRecord
+    db = SessionLocal()
+    try:
+        db.query(AnswerRecord).filter(AnswerRecord.exam_id == exam_id).update(
+            {AnswerRecord.question_snapshot: None}, synchronize_session=False
+        )
+        db.commit()
+    finally:
+        db.close()
+    r = client.delete(f"/api/question-banks/{bank_id}", headers=auth_headers)
+    assert r.status_code == 204
+
+    after = client.get(f"/api/history/{exam_id}", headers=auth_headers).json()
+    assert after["total_count"] == 2
+    assert len(after["answers"]) == 2, "无快照孤儿记录也不应静默跳过"
+    for a in after["answers"]:
+        assert a["question_deleted"] is True
+        assert a["content"] == "（题目已删除，仅保留作答记录）"
+        assert a["correct_answer"] is None
+        assert a["user_answer"] is not None
+
+
+# ── Test: 恢复未完成考试（issue #44）──
+
+
+def _register_isolated_user(client, prefix):
+    """注册独立用户，避免依赖前序测试留下的进行中考试；重置限流计数防 429"""
+    from routers.limiter import limiter
+    limiter._storage.reset()
+    suffix = uuid.uuid4().hex[:8]
+    r = client.post("/api/auth/register", json={"username": f"{prefix}_{suffix}", "password": "123456"})
+    assert r.status_code == 200, f"注册失败: {r.text}"
+    return {"Authorization": f"Bearer {r.json()['access_token']}"}
+
+
+def test_44_unfinished_requires_auth(client):
+    r = client.get("/api/exam/unfinished")
+    assert r.status_code == 401
+
+
+def test_44_unfinished_exam_lifecycle(client):
+    """未完成考试列表：空 → 开考后可见 → 作答后计数递增 → 结束后消失"""
+    headers = _register_isolated_user(client, "resume")
+
+    # 初始为空
+    r = client.get("/api/exam/unfinished", headers=headers)
+    assert r.status_code == 200
+    assert r.json() == []
+
+    # 导入题库并开始考试
+    r = client.post("/api/question-banks/import", json=BANK_DATA, headers=headers)
+    assert r.status_code == 201, r.text
+    bank_id = r.json()["id"]
+    r = client.post("/api/exam/start", json={
+        "bank_ids": [bank_id], "mode": "sequential", "timer_mode": "elapsed",
+    }, headers=headers)
+    assert r.status_code == 200, r.text
+    exam_id = r.json()["exam_id"]
+    total = r.json()["total_count"]
+
+    # 列表包含该考试且摘要字段正确
+    r = client.get("/api/exam/unfinished", headers=headers)
+    assert r.status_code == 200
+    data = r.json()
+    assert len(data) == 1
+    item = data[0]
+    assert item["exam_id"] == exam_id
+    assert item["answered_count"] == 0
+    assert item["total_count"] == total
+    assert item["timer_mode"] == "elapsed"
+    assert item["mode"] == "sequential"
+    assert item["bank_titles"] == [BANK_DATA["title"]]
+    assert item["started_at"]
+
+    # 作答一题后 answered_count 递增
+    q = client.get(f"/api/exam/{exam_id}/current", headers=headers).json()["question"]
+    answer_by_type = {"choice": "A", "judge": "对", "multiple": ["A"]}
+    if q["type"] == "fill":
+        blanks = q.get("blank_count") or 1
+        ans = ["x"] * blanks if blanks > 1 else "x"
+    else:
+        ans = answer_by_type[q["type"]]
+    r = client.post(f"/api/exam/{exam_id}/answer", json={
+        "exam_id": exam_id, "question_id": q["id"],
+        "user_answer": ans, "time_spent_seconds": 1,
+    }, headers=headers)
+    assert r.status_code == 200, r.text
+    r = client.get("/api/exam/unfinished", headers=headers)
+    assert r.json()[0]["answered_count"] == 1
+
+    # 其他用户看不到（用户隔离）
+    other_headers = _register_isolated_user(client, "resume2")
+    r = client.get("/api/exam/unfinished", headers=other_headers)
+    assert r.json() == []
+
+    # 放弃（前端跨会话遗留口径传 elapsed_seconds=0）后不再列出，
+    # 且整卷计时用时不回退为 finished_at-started_at 的墙钟差
+    r = client.post(f"/api/exam/{exam_id}/finish", json={"elapsed_seconds": 0}, headers=headers)
+    assert r.status_code == 200
+    r = client.get("/api/exam/unfinished", headers=headers)
+    assert r.json() == []
+    r = client.get(f"/api/exam/{exam_id}/result", headers=headers)
+    assert r.status_code == 200
+    assert r.json()["duration_seconds"] == 0
+
+
+def test_44_unfinished_multiple_sorted_desc(client):
+    """多场未完成考试按开始时间倒序返回（最新在前）"""
+    headers = _register_isolated_user(client, "resume3")
+    r = client.post("/api/question-banks/import", json=BANK_DATA, headers=headers)
+    bank_id = r.json()["id"]
+
+    ids = []
+    for _ in range(2):
+        r = client.post("/api/exam/start", json={
+            "bank_ids": [bank_id], "mode": "random",
+        }, headers=headers)
+        assert r.status_code == 200
+        ids.append(r.json()["exam_id"])
+
+    r = client.get("/api/exam/unfinished", headers=headers)
+    data = r.json()
+    assert {d["exam_id"] for d in data} == set(ids)
+    starts = [d["started_at"] for d in data]
+    # 同秒开考时 started_at 相同，只断言非递增（倒序），不断言严格顺序
+    assert starts == sorted(starts, reverse=True)
+
+
+def test_44_unfinished_bank_titles_ownership(client):
+    """exam.bank_ids 含他人题库 id 时（issue #125 历史数据 / id 复用），标题不得泄露"""
+    victim_headers = _register_isolated_user(client, "resume_v")
+    r = client.post("/api/question-banks/import", json={**BANK_DATA, "title": "受害者私有题库"}, headers=victim_headers)
+    victim_bank_id = r.json()["id"]
+
+    attacker_headers = _register_isolated_user(client, "resume_a")
+    r = client.post("/api/question-banks/import", json=BANK_DATA, headers=attacker_headers)
+    own_bank_id = r.json()["id"]
+    r = client.post("/api/exam/start", json={
+        "bank_ids": [own_bank_id], "mode": "sequential",
+    }, headers=attacker_headers)
+    exam_id = r.json()["exam_id"]
+
+    # 直接改库模拟 bank_ids 含他人题库 id 的历史脏数据
+    import json
+
+    from database import SessionLocal
+    from models import ExamRecord
+    db = SessionLocal()
+    try:
+        db.query(ExamRecord).filter(ExamRecord.id == exam_id).update(
+            {ExamRecord.bank_ids: json.dumps([own_bank_id, victim_bank_id])}
+        )
+        db.commit()
+    finally:
+        db.close()
+
+    r = client.get("/api/exam/unfinished", headers=attacker_headers)
+    titles = r.json()[0]["bank_titles"]
+    assert "受害者私有题库" not in titles, "他人题库标题不得出现在未完成考试摘要中"
+    assert titles == [BANK_DATA["title"]]
+
+
+# ── Test: 开考快照题库归属校验（issue #125）──
+
+
+def test_125_start_exam_stores_only_owned_bank_ids(client, auth_headers):
+    """携带他人题库 id 开考时，快照 bank_ids 只保留归属校验通过的自己的题库（issue #125）"""
+    # 受害者注册并导入自己的题库
+    r = client.post("/api/auth/register", json={"username": f"victim_{uuid.uuid4().hex[:8]}", "password": "123456"})
+    assert r.status_code == 200, r.text
+    victim_headers = {"Authorization": f"Bearer {r.json()['access_token']}"}
+    r = client.post("/api/question-banks/import", json=BANK_DATA, headers=victim_headers)
+    assert r.status_code == 201, r.text
+    victim_bank_id = r.json()["id"]
+
+    # 攻击者混入受害者的题库 id 开考，请求仍放行（保留既有宽松行为）
+    r = client.post("/api/exam/start", json={
+        "bank_ids": [victim_bank_id, state.bank_id], "mode": "sequential",
+        "choice_timeout": 30, "judge_fill_timeout": 60,
+    }, headers=auth_headers)
+    assert r.status_code == 200, r.text
+    exam_id = r.json()["exam_id"]
+
+    # 快照只应存下攻击者自己的题库 id，不含受害者的
+    from database import SessionLocal
+    from models import ExamRecord
+
+    db = SessionLocal()
+    try:
+        exam = db.query(ExamRecord).filter(ExamRecord.id == exam_id).first()
+        stored = json.loads(exam.bank_ids)
+    finally:
+        db.close()
+    assert victim_bank_id not in stored, f"快照混入他人题库 id：{stored}"
+    assert stored == [state.bank_id], f"快照应仅含自己的题库，实际 {stored}"
 
 
 # ── Test: 考试取题题库归属校验（issue #123）──

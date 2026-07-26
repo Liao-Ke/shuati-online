@@ -194,7 +194,7 @@
 
 ### DELETE /api/question-banks/:id
 
-删除题库及其下全部题目，题目关联的背题记录一并级联删除。
+删除题库及其下全部题目，题目关联的背题记录一并级联删除。已完成考试的历史详情不受影响：答题记录保留作答时的题目快照，删除后仍能展示题干、选项、正确答案与解析（issue #81）。
 
 **响应：** 204 No Content
 
@@ -320,7 +320,7 @@
 
 ### DELETE /api/questions/:id
 
-删除一道题目。关联的背题记录（`review_records`）一并级联删除，背题统计随之回落；答题记录保留、`question_id` 置空，历史详情中不展示已删除题目。
+删除一道题目。关联的背题记录（`review_records`）一并级联删除，背题统计随之回落；答题记录保留、`question_id` 置空，历史详情通过答题快照继续展示该题（标记 `question_deleted: true`，见 `/api/exam/:id/result`）。
 
 **响应：** 204 No Content
 
@@ -370,6 +370,35 @@
 ```
 
 **错误：** 400 — 题库不存在 / 没有符合条件的题目
+
+---
+
+### GET /api/exam/unfinished
+
+列出当前用户所有进行中（`status = "in_progress"`）的考试摘要，按开始时间倒序。用于「继续未完成考试」恢复入口（issue #44）。
+
+**响应 (200)：**
+```json
+[
+  {
+    "exam_id": 42,
+    "bank_titles": ["测试题库"],
+    "mode": "sequential",
+    "timer_mode": "elapsed",
+    "total_count": 20,
+    "answered_count": 5,
+    "started_at": "2026-05-13T10:00:00"
+  }
+]
+```
+
+| 字段 | 说明 |
+|------|------|
+| `bank_titles` | 考试涉及的题库标题列表 |
+| `answered_count` | 已提交答案的题目数 |
+| `started_at` | 开始时间（UTC，无时区后缀） |
+
+无未完成考试时返回空数组。「放弃」未完成考试复用 `POST /api/exam/:id/finish`（未答题计为错误）；整卷计时考试放弃时前端显式传 `elapsed_seconds`（本会话活跃考试为计时器口径，跨会话遗留为 `0`），避免用时回退为墙钟差。
 
 ---
 
@@ -579,6 +608,8 @@
 ```
 
 `answers` 按答题顺序排列。`accuracy` 为 0~1 的小数。
+
+题目已删除时，对应条目回退作答时保存的快照（`question_snapshot`）并附加 `"question_deleted": true`，题干、选项、正确答案、解析仍完整；快照功能上线前已成孤儿的旧记录无快照可回退，`content` 为占位文案「（题目已删除，仅保留作答记录）」，`type`/`options`/`correct_answer`/`analysis` 为 null。题目/题库删除不再导致明细条数少于汇总（issue #81；提前交卷的未作答题目本就不生成明细，见 POST /api/exam/:id/finish）。
 
 ---
 

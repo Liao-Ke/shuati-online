@@ -100,6 +100,9 @@ class AnswerRecord(Base):
     id = Column(Integer, primary_key=True, index=True)
     exam_id = Column(Integer, ForeignKey("exam_records.id"), nullable=False)
     question_id = Column(Integer, ForeignKey("questions.id"), nullable=True)
+    # 作答时的题目快照 JSON（type/chapter/content/options/correct_answer/analysis），
+    # 题目或题库删除后历史详情回退此快照展示（issue #81）
+    question_snapshot = Column(Text, nullable=True)
     user_answer = Column(Text, nullable=True)
     is_correct = Column(Boolean, default=False)
     time_spent_seconds = Column(Integer, default=0)

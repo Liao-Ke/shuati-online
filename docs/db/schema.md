@@ -101,6 +101,7 @@
 | `id` | Integer | PK | | 答题记录 ID |
 | `exam_id` | Integer | FK → exam_records.id, NOT NULL | | 所属答题会话 |
 | `question_id` | Integer | FK → questions.id, NULLABLE | | 题目 ID（可为 null 兼容题目删除后历史可查） |
+| `question_snapshot` | Text | NULLABLE | | 作答时的题目快照 JSON（type/chapter/content/options/correct_answer/analysis）。题目删除后历史详情回退此快照展示；快照功能上线（migration `fc868b9a7b87`）前已成孤儿的旧记录为 null，详情显示占位 |
 | `user_answer` | Text | NULLABLE | | 用户答案。普通字符串或 JSON 数组字符串 |
 | `is_correct` | Boolean | | false | 批改结果 |
 | `time_spent_seconds` | Integer | | 0 | 本题用时（秒） |
@@ -149,7 +150,7 @@ SQLite 3.38+ 支持 `JSON` 数据类型，但为保持与更广泛版本的兼�
 
 | 表 | 策略 | 理由 |
 |------|------|------|
-| `answer_records` | `question_id` 置空保留 | 属于历史答卷，题目删除后成绩单仍需可查，留痕优先 |
+| `answer_records` | `question_id` 置空保留 | 属于历史答卷，题目删除后成绩单仍需可查，留痕优先。作答时固化的 `question_snapshot` 使历史详情在题目删除后仍能展示题干、选项、正确答案与解析（issue #81） |
 | `review_records` | 级联删除 | 表达的是「当前掌握状态」，题目不存在时该状态没有任何含义 |
 
 `review_records` 必须真删而不能只在查询时过滤：掌握状态在题目不存在后没有任何含义。历史上（#131 之前）这里还叠加了主键复用问题——`questions` 主键无 `AUTOINCREMENT` 时，删除最大 id 的题目后新增题目会复用该 id，残留记录被全新题目继承，表现为从未标记过的题目直接显示「已掌握」。级联在 ORM 层实现（`Question.review_records` 的 `cascade="all, delete-orphan"`），删除题库时经由 `QuestionBank.questions` 逐级触发。

@@ -1,7 +1,7 @@
 """questions/question_banks 主键改 AUTOINCREMENT，根除 rowid 复用
 
 Revision ID: 3159d3fe4acc
-Revises: afa1757b2ecd
+Revises: fc868b9a7b87
 Create Date: 2026-07-26 21:29:42.004965
 
 SQLite 的 INTEGER PRIMARY KEY（rowid 别名）会复用已删除行的 id：删除最高位行后，
@@ -24,7 +24,7 @@ from alembic import op
 
 # revision identifiers, used by Alembic.
 revision: str = "3159d3fe4acc"
-down_revision: str | None = "afa1757b2ecd"
+down_revision: str | None = "fc868b9a7b87"
 branch_labels: str | Sequence[str] | None = None
 depends_on: str | Sequence[str] | None = None
 
