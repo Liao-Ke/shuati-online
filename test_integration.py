@@ -32,21 +32,7 @@ ANSWERS = [
 ]
 
 
-class State:
-    """模块级可变状态，在测试间传递数据"""
-    token = None
-    username = None
-    bank_id = None
-    exam_id = None
-    nav_exam_id = None
-    correct_count = 0
-    wrong_exam_id = None
-
-
-state = State()
-
-
-# ── Fixtures ──
+# ── Fixtures 与通用 helper（issue #140 第二步：去模块级共享状态）──
 
 
 @pytest.fixture(scope="session")
@@ -55,13 +41,95 @@ def client():
 
 
 @pytest.fixture(scope="session")
-def auth_headers(client):
-    suffix = uuid.uuid4().hex[:8]
-    state.username = f"test_{suffix}"
-    r = client.post("/api/auth/register", json={"username": state.username, "password": "123456"})
+def session_user(client):
+    """会话级共享用户。只可用于不依赖用户级累计数据的断言；
+    需要精确断言错题数、背题统计等全局计数的测试用 _register_isolated_user。"""
+    username = f"test_{uuid.uuid4().hex[:8]}"
+    r = client.post("/api/auth/register", json={"username": username, "password": "123456"})
     assert r.status_code == 200, f"注册失败: {r.text}"
-    state.token = r.json()["access_token"]
-    return {"Authorization": f"Bearer {state.token}"}
+    return {"username": username, "token": r.json()["access_token"]}
+
+
+@pytest.fixture(scope="session")
+def auth_headers(session_user):
+    return {"Authorization": f"Bearer {session_user['token']}"}
+
+
+@pytest.fixture(scope="session")
+def bank_id(client, auth_headers):
+    """会话级共享题库（BANK_DATA，5 题）。只读约定：仅用于开考、筛选、4xx 校验等
+    不改变题库内容的场景；需要增删改题目或改题库元数据的测试用 own_bank。"""
+    return _import_bank(client, auth_headers)
+
+
+@pytest.fixture
+def own_bank(client, auth_headers):
+    """函数级独立题库（BANK_DATA，5 题），测试内可任意突变，互不干扰"""
+    return _import_bank(client, auth_headers, title=f"独立题库-{uuid.uuid4().hex[:8]}")
+
+
+@pytest.fixture
+def nav_exam(client, auth_headers, bank_id):
+    """顺序模式开考并答对第 1 题（choice → B），供答题导航类测试回看"""
+    r = client.post("/api/exam/start", json={
+        "bank_ids": [bank_id], "mode": "sequential",
+        "types": ["choice", "fill", "judge", "multiple"],
+        "choice_timeout": 30, "judge_fill_timeout": 60,
+    }, headers=auth_headers)
+    assert r.status_code == 200
+    exam_id = r.json()["exam_id"]
+    assert r.json()["total_count"] == 5
+    r = client.get(f"/api/exam/{exam_id}/current", headers=auth_headers)
+    q1_id = r.json()["question"]["id"]
+    r = client.post(f"/api/exam/{exam_id}/answer", json={
+        "exam_id": exam_id, "question_id": q1_id,
+        "user_answer": "B", "time_spent_seconds": 5,
+    }, headers=auth_headers)
+    assert r.json()["is_correct"]
+    return exam_id
+
+
+def _register_isolated_user(client, prefix):
+    """注册独立用户，隔离用户级全局计数（错题、背题统计、未完成考试）；重置限流计数防 429"""
+    from routers.limiter import limiter
+    limiter._storage.reset()
+    suffix = uuid.uuid4().hex[:8]
+    r = client.post("/api/auth/register", json={"username": f"{prefix}_{suffix}", "password": "123456"})
+    assert r.status_code == 200, f"注册失败: {r.text}"
+    return {"Authorization": f"Bearer {r.json()['access_token']}"}
+
+
+def _import_bank(client, headers, data=BANK_DATA, title=None):
+    payload = {**data, "title": title} if title else data
+    r = client.post("/api/question-banks/import", json=payload, headers=headers)
+    assert r.status_code == 201, f"导入失败: {r.text}"
+    return r.json()["id"]
+
+
+def _complete_exam(client, headers, bank_id):
+    """在 bank_id（BANK_DATA 结构）上按 ANSWERS 顺序答完一场考试（3 对 2 错），
+    最后一题提交后考试自动完成。返回 (exam_id, correct_count)"""
+    r = client.post("/api/exam/start", json={
+        "bank_ids": [bank_id], "mode": "sequential",
+        "types": ["choice", "fill", "judge", "multiple"],
+        "choice_timeout": 30, "judge_fill_timeout": 60,
+    }, headers=headers)
+    assert r.status_code == 200, r.text
+    exam_id = r.json()["exam_id"]
+    correct_count = 0
+    for _qtype, ans in ANSWERS:
+        r = client.get(f"/api/exam/{exam_id}/current", headers=headers)
+        assert r.status_code == 200
+        data = r.json()
+        assert data["question"] is not None, f"没有题目了 (index {data['current_index']})"
+        r = client.post(f"/api/exam/{exam_id}/answer", json={
+            "exam_id": exam_id, "question_id": data["question"]["id"],
+            "user_answer": ans, "time_spent_seconds": 5,
+        }, headers=headers)
+        assert r.status_code == 200
+        if r.json()["is_correct"]:
+            correct_count += 1
+    return exam_id, correct_count
 
 
 # ── Test: 健康检查 ──
@@ -76,36 +144,36 @@ def test_00_health(client):
 # ── Test: 注册 + 题库导入 ──
 
 
-def test_01_register(auth_headers):
-    assert state.token is not None
-    assert state.username is not None
+def test_01_register(session_user):
+    assert session_user["token"]
+    assert session_user["username"]
 
 
-def test_01b_login_success(client):
-    r = client.post("/api/auth/login", json={"username": state.username, "password": "123456"})
+def test_01b_login_success(client, session_user):
+    r = client.post("/api/auth/login", json={"username": session_user["username"], "password": "123456"})
     assert r.status_code == 200
     data = r.json()
     assert "access_token" in data
-    assert data["user"]["username"] == state.username
+    assert data["user"]["username"] == session_user["username"]
 
 
-def test_01c_login_wrong_password(client):
-    r = client.post("/api/auth/login", json={"username": state.username, "password": "wrongpwd"})
+def test_01c_login_wrong_password(client, session_user):
+    r = client.post("/api/auth/login", json={"username": session_user["username"], "password": "wrongpwd"})
     assert r.status_code == 401
 
 
-def test_01d_me(client, auth_headers):
+def test_01d_me(client, auth_headers, session_user):
     r = client.get("/api/auth/me", headers=auth_headers)
     assert r.status_code == 200
-    assert r.json()["username"] == state.username
+    assert r.json()["username"] == session_user["username"]
 
 
-def test_01e_register_validation(client):
+def test_01e_register_validation(client, session_user):
     r = client.post("/api/auth/register", json={"username": "a", "password": "123456"})
     assert r.status_code == 400
     r = client.post("/api/auth/register", json={"username": "validuser", "password": "12"})
     assert r.status_code == 400
-    r = client.post("/api/auth/register", json={"username": state.username, "password": "123456"})
+    r = client.post("/api/auth/register", json={"username": session_user["username"], "password": "123456"})
     assert r.status_code == 400
 
 
@@ -164,13 +232,12 @@ def test_01g_register_password_byte_limit(client):
 def test_02_import_bank(client, auth_headers):
     r = client.post("/api/question-banks/import", json=BANK_DATA, headers=auth_headers)
     assert r.status_code == 201, f"导入失败: {r.text}"
-    state.bank_id = r.json()["id"]
     assert r.json()["question_count"] == 5
 
 
-def test_02b_import_bank_options_no_prefix(client, auth_headers):
+def test_02b_import_bank_options_no_prefix(client, auth_headers, bank_id):
     """验证导入后 choice/multiple 题的 options 不包含字母前缀（回归 #51）"""
-    r = client.get(f"/api/question-banks/{state.bank_id}", headers=auth_headers)
+    r = client.get(f"/api/question-banks/{bank_id}", headers=auth_headers)
     assert r.status_code == 200
     for q in r.json()["questions"]:
         if q["type"] in ("choice", "multiple"):
@@ -179,7 +246,7 @@ def test_02b_import_bank_options_no_prefix(client, auth_headers):
                 assert not re.match(r"^[A-Z]\.", opt), f"选项 '{opt}' 包含多余字母前缀"
 
 
-def test_03_list_banks(client, auth_headers):
+def test_03_list_banks(client, auth_headers, bank_id):
     r = client.get("/api/question-banks", headers=auth_headers)
     assert r.status_code == 200
     assert len(r.json()) >= 1
@@ -252,60 +319,45 @@ def test_03c_import_multiple_db_failure(client, auth_headers):
 # ── Test: 答题流程 ──
 
 
-def test_04_start_exam(client, auth_headers):
+def test_04_start_exam(client, auth_headers, bank_id):
     r = client.post("/api/exam/start", json={
-        "bank_ids": [state.bank_id], "mode": "sequential",
+        "bank_ids": [bank_id], "mode": "sequential",
         "types": ["choice", "fill", "judge", "multiple"],
         "choice_timeout": 30, "judge_fill_timeout": 60,
     }, headers=auth_headers)
     assert r.status_code == 200
-    state.exam_id = r.json()["exam_id"]
     assert r.json()["total_count"] == 5
 
 
-def test_04a_start_exam_rejects_nonpositive_count(client, auth_headers):
+def test_04a_start_exam_rejects_nonpositive_count(client, auth_headers, bank_id):
     """question_count 为 0/负数时应在请求边界被拒为 422（issue #45）。
     None 表示用全部题目，其行为由 test_04（省略该字段）覆盖。"""
     for bad in (-1, 0):
         r = client.post("/api/exam/start", json={
-            "bank_ids": [state.bank_id], "mode": "random",
+            "bank_ids": [bank_id], "mode": "random",
             "question_count": bad,
         }, headers=auth_headers)
         assert r.status_code == 422, f"question_count={bad} 应被拒绝，实际 {r.status_code}"
 
 
-def test_05_answer_all(client, auth_headers):
-    exam_id = state.exam_id
-    correct_count = 0
-    for _i, (_qtype, ans) in enumerate(ANSWERS, 1):
-        r = client.get(f"/api/exam/{exam_id}/current", headers=auth_headers)
-        assert r.status_code == 200
-        data = r.json()
-        assert data["question"] is not None, f"没有题目了 (index {data['current_index']})"
-        qid = data["question"]["id"]
-        r = client.post(f"/api/exam/{exam_id}/answer", json={
-            "exam_id": exam_id, "question_id": qid,
-            "user_answer": ans, "time_spent_seconds": 5,
-        }, headers=auth_headers)
-        assert r.status_code == 200
-        if r.json()["is_correct"]:
-            correct_count += 1
-    state.correct_count = correct_count
+def test_05_answer_all(client, auth_headers, bank_id):
+    _, correct_count = _complete_exam(client, auth_headers, bank_id)
     assert correct_count == 3
 
 
-def test_06_exam_result(client, auth_headers):
-    r = client.get(f"/api/exam/{state.exam_id}/result", headers=auth_headers)
+def test_06_exam_result(client, auth_headers, bank_id):
+    exam_id, correct_count = _complete_exam(client, auth_headers, bank_id)
+    r = client.get(f"/api/exam/{exam_id}/result", headers=auth_headers)
     assert r.status_code == 200
     res = r.json()
     assert res["total_count"] == 5
-    assert res["correct_count"] == state.correct_count
+    assert res["correct_count"] == correct_count
 
 
-def test_06a_finish_exam_unanswered_count(client, auth_headers):
+def test_06a_finish_exam_unanswered_count(client, auth_headers, bank_id):
     """finish_exam 时未作答题应计入 wrong_count，total_count == question_count（issue #22）"""
     r = client.post("/api/exam/start", json={
-        "bank_ids": [state.bank_id], "mode": "sequential",
+        "bank_ids": [bank_id], "mode": "sequential",
         "types": ["choice", "fill", "judge", "multiple"],
         "choice_timeout": 30, "judge_fill_timeout": 60,
     }, headers=auth_headers)
@@ -327,18 +379,19 @@ def test_06a_finish_exam_unanswered_count(client, auth_headers):
     assert res["wrong_count"] == total - res["correct_count"], "未作答题应计入 wrong_count"
 
 
-def test_06b_exam_progress(client, auth_headers):
-    r = client.get(f"/api/exam/{state.exam_id}/progress", headers=auth_headers)
+def test_06b_exam_progress(client, auth_headers, bank_id):
+    exam_id, _ = _complete_exam(client, auth_headers, bank_id)
+    r = client.get(f"/api/exam/{exam_id}/progress", headers=auth_headers)
     assert r.status_code == 200
     data = r.json()
     assert data["total_count"] == 5
     assert len(data["answers"]) == 5
 
 
-def test_06c_preview_hides_unanswered(client, auth_headers):
+def test_06c_preview_hides_unanswered(client, auth_headers, bank_id):
     """整卷预览接口对未作答题隐藏 answer/analysis（issue #17）"""
     r = client.post("/api/exam/start", json={
-        "bank_ids": [state.bank_id], "mode": "sequential",
+        "bank_ids": [bank_id], "mode": "sequential",
         "types": ["choice", "fill", "judge", "multiple"],
         "choice_timeout": 30, "judge_fill_timeout": 60,
     }, headers=auth_headers)
@@ -372,18 +425,32 @@ def test_06c_preview_hides_unanswered(client, auth_headers):
 # ── Test: 错题本 + 历史 ──
 
 
-def test_07_wrong_answers(client, auth_headers):
-    r = client.get("/api/wrong-answers", headers=auth_headers)
+def test_07_wrong_answers(client):
+    headers = _register_isolated_user(client, "wrong")
+    bank = _import_bank(client, headers)
+    _complete_exam(client, headers, bank)  # 3 对 2 错
+    # 再交一场零作答的卷：未作答题只计入 wrong_count，不得生成错题本记录
+    r = client.post("/api/exam/start", json={
+        "bank_ids": [bank], "mode": "sequential",
+    }, headers=headers)
     assert r.status_code == 200
-    assert len(r.json()) == 2
+    r = client.post(f"/api/exam/{r.json()['exam_id']}/finish", json={}, headers=headers)
+    assert r.status_code == 200
+    r = client.get("/api/wrong-answers", headers=headers)
+    assert r.status_code == 200
+    assert len(r.json()) == 2, "错题本应只含提交且答错的 2 题，未作答题不应混入"
     # #54: 错题响应应返回 bank_id，前端据此区分同名题库
     for item in r.json():
         assert "bank_id" in item, "错题响应缺少 bank_id 字段"
 
 
-def test_07f_wrong_answers_same_title_distinct_bank_id(client, auth_headers):
+def test_07f_wrong_answers_same_title_distinct_bank_id(client):
     """同名题库应通过 bank_id 区分，bank_title 相同但 bank_id 不同 (#54)"""
-    # 再导入一个同名题库（与 state.bank_id 的题库同名 "测试题库"），只含 1 道选择题
+    headers = _register_isolated_user(client, "same_title")
+    first_bank_id = _import_bank(client, headers)  # 题库名 "测试题库"
+    _complete_exam(client, headers, first_bank_id)  # 产生 2 道错题
+
+    # 再导入一个同名题库，只含 1 道选择题
     same_title_data = {
         "title": "测试题库",
         "description": "同名题库二",
@@ -391,10 +458,10 @@ def test_07f_wrong_answers_same_title_distinct_bank_id(client, auth_headers):
             {"type": "choice", "chapter": "基础", "content": "2+2=?", "options": ["3", "4", "5", "6"], "answer": "B"},
         ],
     }
-    r = client.post("/api/question-banks/import", json=same_title_data, headers=auth_headers)
+    r = client.post("/api/question-banks/import", json=same_title_data, headers=headers)
     assert r.status_code in (200, 201), f"导入同名题库失败: {r.text}"
     second_bank_id = r.json()["id"]
-    assert second_bank_id != state.bank_id, "同名题库应有不同 ID"
+    assert second_bank_id != first_bank_id, "同名题库应有不同 ID"
 
     # 用第二个题库单独开考并答错，产生错题
     r = client.post("/api/exam/start", json={
@@ -402,53 +469,60 @@ def test_07f_wrong_answers_same_title_distinct_bank_id(client, auth_headers):
         "mode": "sequential",
         "question_count": 1,
         "timer_mode": "per_question",
-    }, headers=auth_headers)
+    }, headers=headers)
     assert r.status_code == 200, f"开始考试失败: {r.text}"
     exam_id = r.json()["exam_id"]
-    r = client.get(f"/api/exam/{exam_id}/current", headers=auth_headers)
+    r = client.get(f"/api/exam/{exam_id}/current", headers=headers)
     q = r.json()["question"]
     r = client.post(f"/api/exam/{exam_id}/answer", json={
         "exam_id": exam_id, "question_id": q["id"], "user_answer": "A", "time_spent_seconds": 3,
-    }, headers=auth_headers)
+    }, headers=headers)
     assert r.status_code == 200
-    client.post(f"/api/exam/{exam_id}/finish", json={}, headers=auth_headers)
+    client.post(f"/api/exam/{exam_id}/finish", json={}, headers=headers)
 
     # 错题本应能通过 bank_id 区分两个同名题库
-    r = client.get("/api/wrong-answers", headers=auth_headers)
+    r = client.get("/api/wrong-answers", headers=headers)
     wrongs = r.json()
     same_title = [w for w in wrongs if w.get("bank_title") == "测试题库"]
     assert len(same_title) >= 1
     bank_ids = {w["bank_id"] for w in same_title}
-    assert state.bank_id in bank_ids, "原同名题库的错题应保留来源 bank_id"
+    assert first_bank_id in bank_ids, "原同名题库的错题应保留来源 bank_id"
     assert second_bank_id in bank_ids, "第二个同名题库的错题应能通过 bank_id 识别来源"
     assert len(bank_ids) >= 2, "同名题库不应再被 bank_title 混成一个来源"
     assert all(w["bank_id"] for w in same_title), "bank_id 不应为空"
-
-    # 清理第二个题库，避免影响后续 test_14_verify_delete 的 0 题库断言
-    client.delete(f"/api/question-banks/{second_bank_id}", headers=auth_headers)
 
 
 # ── Test: 错题练习 ──
 
 
-def test_07b_wrong_practice_start(client, auth_headers):
+def test_07b_wrong_practice_start(client):
     """POST /api/wrong-answers/start 应返回有效的 exam_id"""
+    headers = _register_isolated_user(client, "wpractice")
+    bank = _import_bank(client, headers)
+    _complete_exam(client, headers, bank)  # 产生 2 道错题
     r = client.post("/api/wrong-answers/start", json={
-        "bank_ids": [state.bank_id],
+        "bank_ids": [bank],
         "timer_mode": "per_question",
-    }, headers=auth_headers)
+    }, headers=headers)
     assert r.status_code == 200, f"错题练习启动失败: {r.text}"
     data = r.json()
     assert "exam_id" in data
     assert data["total_count"] == 2  # 测试数据中有 2 道错题
-    state.wrong_exam_id = data["exam_id"]
 
 
-def test_07c_wrong_practice_exam_flow(client, auth_headers):
+def test_07c_wrong_practice_exam_flow(client):
     """错题练习的答题流程应正常：获取题目、提交答案、完成"""
-    exam_id = state.wrong_exam_id
+    headers = _register_isolated_user(client, "wflow")
+    bank = _import_bank(client, headers)
+    _complete_exam(client, headers, bank)
+    r = client.post("/api/wrong-answers/start", json={
+        "bank_ids": [bank],
+        "timer_mode": "per_question",
+    }, headers=headers)
+    assert r.status_code == 200, f"错题练习启动失败: {r.text}"
+    exam_id = r.json()["exam_id"]
     # 获取当前题目
-    r = client.get(f"/api/exam/{exam_id}/current", headers=auth_headers)
+    r = client.get(f"/api/exam/{exam_id}/current", headers=headers)
     assert r.status_code == 200, f"获取当前题目失败: {r.text}"
     curr = r.json()
     assert curr["question"] is not None
@@ -460,13 +534,13 @@ def test_07c_wrong_practice_exam_flow(client, auth_headers):
         "question_id": q["id"],
         "user_answer": wrong_answer,
         "time_spent_seconds": 5,
-    }, headers=auth_headers)
+    }, headers=headers)
     assert r.status_code == 200, f"提交答案失败: {r.text}"
     # 完成考试
-    r = client.post(f"/api/exam/{exam_id}/finish", json={}, headers=auth_headers)
+    r = client.post(f"/api/exam/{exam_id}/finish", json={}, headers=headers)
     assert r.status_code == 200
     # 获取结果
-    r = client.get(f"/api/exam/{exam_id}/result", headers=auth_headers)
+    r = client.get(f"/api/exam/{exam_id}/result", headers=headers)
     assert r.status_code == 200
     result = r.json()
     assert result["total_count"] > 0
@@ -513,9 +587,9 @@ def test_07g_wrong_practice_rejects_invalid_timer_mode(client, auth_headers):
 # ── Test: 提前交卷 ──
 
 
-def test_07f_early_finish(client, auth_headers):
+def test_07f_early_finish(client, auth_headers, bank_id):
     r = client.post("/api/exam/start", json={
-        "bank_ids": [state.bank_id], "mode": "sequential",
+        "bank_ids": [bank_id], "mode": "sequential",
         "types": ["choice"], "choice_timeout": 30, "judge_fill_timeout": 60,
     }, headers=auth_headers)
     assert r.status_code == 200
@@ -534,9 +608,9 @@ def test_07f_early_finish(client, auth_headers):
     assert r.json()["total_count"] == 1
 
 
-def test_07g_submit_after_finish_400(client, auth_headers):
+def test_07g_submit_after_finish_400(client, auth_headers, bank_id):
     r = client.post("/api/exam/start", json={
-        "bank_ids": [state.bank_id], "mode": "sequential",
+        "bank_ids": [bank_id], "mode": "sequential",
         "types": ["choice", "fill"], "choice_timeout": 30, "judge_fill_timeout": 60,
     }, headers=auth_headers)
     finished_exam_id = r.json()["exam_id"]
@@ -554,9 +628,9 @@ def test_07g_submit_after_finish_400(client, auth_headers):
     assert r.status_code == 400
 
 
-def test_07h_unfinished_exam_result_409(client, auth_headers):
+def test_07h_unfinished_exam_result_409(client, auth_headers, bank_id):
     r = client.post("/api/exam/start", json={
-        "bank_ids": [state.bank_id], "mode": "sequential",
+        "bank_ids": [bank_id], "mode": "sequential",
         "types": ["choice"], "choice_timeout": 30, "judge_fill_timeout": 60,
     }, headers=auth_headers)
     unfinished_exam_id = r.json()["exam_id"]
@@ -566,19 +640,22 @@ def test_07h_unfinished_exam_result_409(client, auth_headers):
     assert r.status_code == 200
 
 
-def test_08_history(client, auth_headers):
+def test_08_history(client, auth_headers, bank_id):
+    _complete_exam(client, auth_headers, bank_id)
     r = client.get("/api/history", headers=auth_headers)
     assert r.status_code == 200
     assert len(r.json()) >= 1
 
 
-def test_09_history_detail(client, auth_headers):
-    r = client.get(f"/api/history/{state.exam_id}", headers=auth_headers)
+def test_09_history_detail(client, auth_headers, bank_id):
+    exam_id, _ = _complete_exam(client, auth_headers, bank_id)
+    r = client.get(f"/api/history/{exam_id}", headers=auth_headers)
     assert r.status_code == 200
-    assert r.json()["exam_id"] == state.exam_id
+    assert r.json()["exam_id"] == exam_id
 
 
-def test_10_dashboard(client, auth_headers):
+def test_10_dashboard(client, auth_headers, bank_id):
+    _complete_exam(client, auth_headers, bank_id)
     r = client.get("/api/dashboard", headers=auth_headers)
     assert r.status_code == 200
     d = r.json()
@@ -595,54 +672,30 @@ def test_11_static_file(client):
 # ── Test: 题库详情 + 删除 ──
 
 
-def test_12_bank_detail(client, auth_headers):
-    r = client.get(f"/api/question-banks/{state.bank_id}", headers=auth_headers)
+def test_12_bank_detail(client, auth_headers, bank_id):
+    r = client.get(f"/api/question-banks/{bank_id}", headers=auth_headers)
     assert r.status_code == 200
     assert len(r.json()["questions"]) == 5
 
 
-def test_13_delete_bank(client, auth_headers):
-    r = client.delete(f"/api/question-banks/{state.bank_id}", headers=auth_headers)
+def test_13_delete_bank_and_reimport(client):
+    """删除题库 → 列表清零 → 重新导入（原 test_13/14/15 顺序链，改为独立用户自包含流程）"""
+    headers = _register_isolated_user(client, "delbank")
+    bank = _import_bank(client, headers)
+    r = client.delete(f"/api/question-banks/{bank}", headers=headers)
     assert r.status_code == 204
-
-
-def test_14_verify_delete(client, auth_headers):
-    r = client.get("/api/question-banks", headers=auth_headers)
+    r = client.get("/api/question-banks", headers=headers)
     assert len(r.json()) == 0
-
-
-# ── Test: 重新导入 + 答题导航 ──
-
-
-def test_15_reimport(client, auth_headers):
-    r = client.post("/api/question-banks/import", json=BANK_DATA, headers=auth_headers)
+    r = client.post("/api/question-banks/import", json=BANK_DATA, headers=headers)
     assert r.status_code == 201
-    state.bank_id = r.json()["id"]
+    assert r.json()["question_count"] == 5, "删除后重导入的题库应完整可用"
 
 
-def test_16_start_exam_for_nav(client, auth_headers):
-    r = client.post("/api/exam/start", json={
-        "bank_ids": [state.bank_id], "mode": "sequential",
-        "types": ["choice", "fill", "judge", "multiple"],
-        "choice_timeout": 30, "judge_fill_timeout": 60,
-    }, headers=auth_headers)
-    assert r.status_code == 200
-    state.nav_exam_id = r.json()["exam_id"]
-    assert r.json()["total_count"] == 5
+# ── Test: 答题导航（开考 + 答对第 1 题由 nav_exam fixture 完成，原 test_16/17）──
 
 
-def test_17_answer_q1(client, auth_headers):
-    r = client.get(f"/api/exam/{state.nav_exam_id}/current", headers=auth_headers)
-    q1_id = r.json()["question"]["id"]
-    r = client.post(f"/api/exam/{state.nav_exam_id}/answer", json={
-        "exam_id": state.nav_exam_id, "question_id": q1_id,
-        "user_answer": "B", "time_spent_seconds": 5,
-    }, headers=auth_headers)
-    assert r.json()["is_correct"]
-
-
-def test_18_navigate_index_0(client, auth_headers):
-    r = client.get(f"/api/exam/{state.nav_exam_id}/current?index=0", headers=auth_headers)
+def test_18_navigate_index_0(client, auth_headers, nav_exam):
+    r = client.get(f"/api/exam/{nav_exam}/current?index=0", headers=auth_headers)
     data = r.json()
     assert data["current_index"] == 1
     assert data["is_answered"] is True
@@ -651,8 +704,8 @@ def test_18_navigate_index_0(client, auth_headers):
     assert data["correct_answer"] is not None
 
 
-def test_19_navigate_index_1(client, auth_headers):
-    r = client.get(f"/api/exam/{state.nav_exam_id}/current?index=1", headers=auth_headers)
+def test_19_navigate_index_1(client, auth_headers, nav_exam):
+    r = client.get(f"/api/exam/{nav_exam}/current?index=1", headers=auth_headers)
     data = r.json()
     assert data["current_index"] == 2
     assert data["is_answered"] is False
@@ -660,8 +713,8 @@ def test_19_navigate_index_1(client, auth_headers):
     assert data["question"]["answer"] is None
 
 
-def test_20_navigate_out_of_bounds(client, auth_headers):
-    r = client.get(f"/api/exam/{state.nav_exam_id}/current?index=999", headers=auth_headers)
+def test_20_navigate_out_of_bounds(client, auth_headers, nav_exam):
+    r = client.get(f"/api/exam/{nav_exam}/current?index=999", headers=auth_headers)
     assert r.status_code == 400
 
 
@@ -695,9 +748,9 @@ def test_20a_delete_blocked_by_inprogress(client, auth_headers):
     assert r.status_code == 204, f"考试完成后应可删除题库: {r.text}"
 
 
-def test_21_review_chapters(client, auth_headers):
+def test_21_review_chapters(client, auth_headers, bank_id):
     r = client.post("/api/review/chapters", json={
-        "bank_ids": [state.bank_id],
+        "bank_ids": [bank_id],
     }, headers=auth_headers)
     assert r.status_code == 200
     chapters = r.json()
@@ -708,9 +761,9 @@ def test_21_review_chapters(client, auth_headers):
 # ── Test: 背题模式 ──
 
 
-def test_22_review_questions(client, auth_headers):
+def test_22_review_questions(client, auth_headers, bank_id):
     r = client.post("/api/review/questions", json={
-        "bank_ids": [state.bank_id],
+        "bank_ids": [bank_id],
         "types": ["choice", "fill", "judge", "multiple"],
     }, headers=auth_headers)
     assert r.status_code == 200
@@ -721,33 +774,51 @@ def test_22_review_questions(client, auth_headers):
         assert q["review_status"] is None
 
 
-def test_23_mark_known(client, auth_headers):
+def test_23_mark_known(client):
+    # 断言用户级全局背题统计的精确值，用独立用户隔离
+    headers = _register_isolated_user(client, "mark")
+    bank = _import_bank(client, headers)
     r = client.post("/api/review/questions", json={
-        "bank_ids": [state.bank_id],
+        "bank_ids": [bank],
         "types": ["choice", "fill", "judge", "multiple"],
-    }, headers=auth_headers)
+    }, headers=headers)
     first_qid = r.json()[0]["id"]
     r = client.post("/api/review/mark", json={
         "question_id": first_qid, "status": "known",
-    }, headers=auth_headers)
+    }, headers=headers)
     stats = r.json()
     assert stats["known_count"] == 1
     assert stats["reviewing_count"] == 0
     assert stats["total_reviewed"] == 1
-    state._review_first_qid = first_qid
 
 
-def test_24_mark_reviewing(client, auth_headers):
+def test_24_mark_reviewing(client):
+    # 先标 known 再改标 reviewing，断言全局统计随之翻转（独立用户隔离计数）
+    headers = _register_isolated_user(client, "remark")
+    bank = _import_bank(client, headers)
+    r = client.post("/api/review/questions", json={
+        "bank_ids": [bank],
+    }, headers=headers)
+    first_qid = r.json()[0]["id"]
     r = client.post("/api/review/mark", json={
-        "question_id": state._review_first_qid, "status": "reviewing",
-    }, headers=auth_headers)
+        "question_id": first_qid, "status": "known",
+    }, headers=headers)
+    assert r.status_code == 200
+    r = client.post("/api/review/mark", json={
+        "question_id": first_qid, "status": "reviewing",
+    }, headers=headers)
     stats = r.json()
     assert stats["known_count"] == 0
     assert stats["reviewing_count"] == 1
     assert stats["total_reviewed"] == 1
 
 
-def test_25_review_stats(client, auth_headers):
+def test_25_review_stats(client, auth_headers, own_bank):
+    qid = client.get(f"/api/question-banks/{own_bank}", headers=auth_headers).json()["questions"][0]["id"]
+    r = client.post("/api/review/mark", json={
+        "question_id": qid, "status": "known",
+    }, headers=auth_headers)
+    assert r.status_code == 200
     r = client.get("/api/review/stats", headers=auth_headers)
     stats = r.json()
     assert stats["total_reviewed"] >= 1
@@ -831,13 +902,16 @@ def test_25b_review_record_not_inherited_by_reused_id(client, auth_headers):
     assert client.delete(f"/api/question-banks/{bank_id}", headers=auth_headers).status_code == 204
 
 
-def test_26_filter_reviewing_only(client, auth_headers):
+def test_26_filter_reviewing_only(client, auth_headers, own_bank):
+    questions = client.post("/api/review/questions", json={
+        "bank_ids": [own_bank],
+    }, headers=auth_headers).json()
     r = client.post("/api/review/mark", json={
-        "question_id": state._review_first_qid, "status": "known",
+        "question_id": questions[0]["id"], "status": "known",
     }, headers=auth_headers)
     assert r.status_code == 200
     r = client.post("/api/review/questions", json={
-        "bank_ids": [state.bank_id],
+        "bank_ids": [own_bank],
         "show_reviewing_only": True,
     }, headers=auth_headers)
     filtered = r.json()
@@ -845,12 +919,15 @@ def test_26_filter_reviewing_only(client, auth_headers):
     assert len(known_ids) == 0
 
 
-def test_26a_filter_reviewing_only_excludes_unmarked(client, auth_headers):
-    # 第一道题在 test_26 已标记为 known；取第二道题标记为 reviewing
-    r = client.post("/api/review/questions", json={
-        "bank_ids": [state.bank_id],
+def test_26a_filter_reviewing_only_excludes_unmarked(client, auth_headers, own_bank):
+    # 第一道题标 known，第二道题标 reviewing，其余不标记
+    questions = client.post("/api/review/questions", json={
+        "bank_ids": [own_bank],
+    }, headers=auth_headers).json()
+    r = client.post("/api/review/mark", json={
+        "question_id": questions[0]["id"], "status": "known",
     }, headers=auth_headers)
-    questions = r.json()
+    assert r.status_code == 200
     reviewing_qid = questions[1]["id"]
     r = client.post("/api/review/mark", json={
         "question_id": reviewing_qid, "status": "reviewing",
@@ -858,7 +935,7 @@ def test_26a_filter_reviewing_only_excludes_unmarked(client, auth_headers):
     assert r.status_code == 200
 
     r = client.post("/api/review/questions", json={
-        "bank_ids": [state.bank_id],
+        "bank_ids": [own_bank],
         "show_reviewing_only": True,
     }, headers=auth_headers)
     filtered = r.json()
@@ -867,9 +944,9 @@ def test_26a_filter_reviewing_only_excludes_unmarked(client, auth_headers):
     assert all(q["review_status"] == "reviewing" for q in filtered)
 
 
-def test_27_review_type_filter_choice(client, auth_headers):
+def test_27_review_type_filter_choice(client, auth_headers, bank_id):
     r = client.post("/api/review/questions", json={
-        "bank_ids": [state.bank_id],
+        "bank_ids": [bank_id],
         "types": ["choice"],
     }, headers=auth_headers)
     type_filtered = r.json()
@@ -877,9 +954,9 @@ def test_27_review_type_filter_choice(client, auth_headers):
     assert type_filtered[0]["type"] == "choice"
 
 
-def test_28_review_type_filter_multiple(client, auth_headers):
+def test_28_review_type_filter_multiple(client, auth_headers, bank_id):
     r = client.post("/api/review/questions", json={
-        "bank_ids": [state.bank_id],
+        "bank_ids": [bank_id],
         "types": ["multiple"],
     }, headers=auth_headers)
     multi_filtered = r.json()
@@ -890,69 +967,64 @@ def test_28_review_type_filter_multiple(client, auth_headers):
 # ── Test: 题目 CURD ──
 
 
-def test_29_create_question_choice(client, auth_headers):
-    r = client.post(f"/api/question-banks/{state.bank_id}/questions", json={
+def _create_question(client, headers, bank_id, payload):
+    r = client.post(f"/api/question-banks/{bank_id}/questions", json=payload, headers=headers)
+    assert r.status_code == 201, f"创建题目失败: {r.text}"
+    return r.json()
+
+
+def test_29_create_question_choice(client, auth_headers, own_bank):
+    data = _create_question(client, auth_headers, own_bank, {
         "type": "choice", "chapter": "新章节", "content": "1+2=?",
         "options": ["1", "2", "3", "4"], "answer": "C",
-    }, headers=auth_headers)
-    assert r.status_code == 201
-    data = r.json()
+    })
     assert data["type"] == "choice"
     assert data["content"] == "1+2=?"
     assert data["sort_order"] >= 0
-    state._q_choice_id = data["id"]
 
 
-def test_29b_create_question_updates_bank_updated_at(client, auth_headers):
+def test_29b_create_question_updates_bank_updated_at(client, auth_headers, own_bank):
     """新增题目后题库 updated_at 应刷新（issue #87）"""
-    r = client.get(f"/api/question-banks/{state.bank_id}", headers=auth_headers)
+    r = client.get(f"/api/question-banks/{own_bank}", headers=auth_headers)
     assert r.status_code == 200
     before = datetime.fromisoformat(r.json()["updated_at"])
     time.sleep(0.01)
-    r = client.post(f"/api/question-banks/{state.bank_id}/questions", json={
+    r = client.post(f"/api/question-banks/{own_bank}/questions", json={
         "type": "judge", "content": "新增题目更新时间测试", "answer": "对",
     }, headers=auth_headers)
     assert r.status_code == 201
-    r = client.get(f"/api/question-banks/{state.bank_id}", headers=auth_headers)
+    r = client.get(f"/api/question-banks/{own_bank}", headers=auth_headers)
     after = datetime.fromisoformat(r.json()["updated_at"])
     assert after > before
 
 
-def test_30_create_question_fill(client, auth_headers):
-    r = client.post(f"/api/question-banks/{state.bank_id}/questions", json={
+def test_30_create_question_fill(client, auth_headers, own_bank):
+    _create_question(client, auth_headers, own_bank, {
         "type": "fill", "content": "中国的首都是____", "answer": "北京",
-    }, headers=auth_headers)
-    assert r.status_code == 201
-    state._q_fill_id = r.json()["id"]
+    })
 
 
-def test_31_create_question_fill_multi(client, auth_headers):
-    r = client.post(f"/api/question-banks/{state.bank_id}/questions", json={
+def test_31_create_question_fill_multi(client, auth_headers, own_bank):
+    _create_question(client, auth_headers, own_bank, {
         "type": "fill", "content": "____和____是数字", "answer": ["一", "二"],
-    }, headers=auth_headers)
-    assert r.status_code == 201
-    state._q_fill_multi_id = r.json()["id"]
+    })
 
 
-def test_32_create_question_judge(client, auth_headers):
-    r = client.post(f"/api/question-banks/{state.bank_id}/questions", json={
+def test_32_create_question_judge(client, auth_headers, own_bank):
+    _create_question(client, auth_headers, own_bank, {
         "type": "judge", "content": "太阳从西边升起", "answer": "错",
-    }, headers=auth_headers)
-    assert r.status_code == 201
-    state._q_judge_id = r.json()["id"]
+    })
 
 
-def test_33_create_question_multiple(client, auth_headers):
-    r = client.post(f"/api/question-banks/{state.bank_id}/questions", json={
+def test_33_create_question_multiple(client, auth_headers, own_bank):
+    _create_question(client, auth_headers, own_bank, {
         "type": "multiple", "content": "以下哪些是数字？",
         "options": ["一", "二", "三", "四"], "answer": ["A", "B"],
-    }, headers=auth_headers)
-    assert r.status_code == 201
-    state._q_multi_id = r.json()["id"]
+    })
 
 
-def test_34_create_question_validation_error(client, auth_headers):
-    r = client.post(f"/api/question-banks/{state.bank_id}/questions", json={
+def test_34_create_question_validation_error(client, auth_headers, bank_id):
+    r = client.post(f"/api/question-banks/{bank_id}/questions", json={
         "type": "choice", "content": "test", "options": ["1"], "answer": "A",
     }, headers=auth_headers)
     assert r.status_code == 400
@@ -966,31 +1038,41 @@ def test_35_create_question_nonexistent_bank(client, auth_headers):
     assert r.status_code == 404
 
 
-def test_36_edit_question_content(client, auth_headers):
-    r = client.put(f"/api/questions/{state._q_choice_id}", json={
+def _create_choice_question(client, headers, bank_id):
+    return _create_question(client, headers, bank_id, {
+        "type": "choice", "chapter": "新章节", "content": "1+2=?",
+        "options": ["1", "2", "3", "4"], "answer": "C",
+    })["id"]
+
+
+def test_36_edit_question_content(client, auth_headers, own_bank):
+    qid = _create_choice_question(client, auth_headers, own_bank)
+    r = client.put(f"/api/questions/{qid}", json={
         "content": "2+2=?",
     }, headers=auth_headers)
     assert r.status_code == 200
     assert r.json()["content"] == "2+2=?"
 
 
-def test_36b_edit_question_updates_bank_updated_at(client, auth_headers):
+def test_36b_edit_question_updates_bank_updated_at(client, auth_headers, own_bank):
     """编辑题目后题库 updated_at 应刷新（issue #87）"""
-    r = client.get(f"/api/question-banks/{state.bank_id}", headers=auth_headers)
+    qid = _create_choice_question(client, auth_headers, own_bank)
+    r = client.get(f"/api/question-banks/{own_bank}", headers=auth_headers)
     assert r.status_code == 200
     before = datetime.fromisoformat(r.json()["updated_at"])
     time.sleep(0.01)
-    r = client.put(f"/api/questions/{state._q_choice_id}", json={
+    r = client.put(f"/api/questions/{qid}", json={
         "analysis": "更新时间测试",
     }, headers=auth_headers)
     assert r.status_code == 200
-    r = client.get(f"/api/question-banks/{state.bank_id}", headers=auth_headers)
+    r = client.get(f"/api/question-banks/{own_bank}", headers=auth_headers)
     after = datetime.fromisoformat(r.json()["updated_at"])
     assert after > before
 
 
-def test_37_edit_question_switch_type(client, auth_headers):
-    r = client.put(f"/api/questions/{state._q_choice_id}", json={
+def test_37_edit_question_switch_type(client, auth_headers, own_bank):
+    qid = _create_choice_question(client, auth_headers, own_bank)
+    r = client.put(f"/api/questions/{qid}", json={
         "type": "fill", "content": "1+1=?", "options": None, "answer": "二",
     }, headers=auth_headers)
     assert r.status_code == 200
@@ -1004,20 +1086,20 @@ def test_38_edit_question_not_found(client, auth_headers):
     assert r.status_code == 404
 
 
-def test_38b_delete_question_updates_bank_updated_at(client, auth_headers):
+def test_38b_delete_question_updates_bank_updated_at(client, auth_headers, own_bank):
     """删除题目后题库 updated_at 应刷新（issue #87）"""
-    r = client.post(f"/api/question-banks/{state.bank_id}/questions", json={
+    r = client.post(f"/api/question-banks/{own_bank}/questions", json={
         "type": "judge", "content": "待删除以测试更新时间", "answer": "对",
     }, headers=auth_headers)
     assert r.status_code == 201
     qid = r.json()["id"]
-    r = client.get(f"/api/question-banks/{state.bank_id}", headers=auth_headers)
+    r = client.get(f"/api/question-banks/{own_bank}", headers=auth_headers)
     assert r.status_code == 200
     before = datetime.fromisoformat(r.json()["updated_at"])
     time.sleep(0.01)
     r = client.delete(f"/api/questions/{qid}", headers=auth_headers)
     assert r.status_code == 204
-    r = client.get(f"/api/question-banks/{state.bank_id}", headers=auth_headers)
+    r = client.get(f"/api/question-banks/{own_bank}", headers=auth_headers)
     after = datetime.fromisoformat(r.json()["updated_at"])
     assert after > before
 
@@ -1054,12 +1136,15 @@ def test_38c_edit_question_blocked_by_inprogress(client, auth_headers):
     client.delete(f"/api/question-banks/{test_bank_id}", headers=auth_headers)
 
 
-def test_39_delete_question(client, auth_headers):
-    r = client.delete(f"/api/questions/{state._q_fill_multi_id}", headers=auth_headers)
+def test_39_delete_question(client, auth_headers, own_bank):
+    qid = _create_question(client, auth_headers, own_bank, {
+        "type": "fill", "content": "____和____是数字", "answer": ["一", "二"],
+    })["id"]
+    r = client.delete(f"/api/questions/{qid}", headers=auth_headers)
     assert r.status_code == 204
-    bank = client.get(f"/api/question-banks/{state.bank_id}", headers=auth_headers).json()
+    bank = client.get(f"/api/question-banks/{own_bank}", headers=auth_headers).json()
     ids = [q["id"] for q in bank["questions"]]
-    assert state._q_fill_multi_id not in ids
+    assert qid not in ids
 
 
 def test_40_delete_question_not_found(client, auth_headers):
@@ -1070,8 +1155,8 @@ def test_40_delete_question_not_found(client, auth_headers):
 # ── Test: 题库更新与导出 ──
 
 
-def test_41_update_bank(client, auth_headers):
-    r = client.put(f"/api/question-banks/{state.bank_id}", json={
+def test_41_update_bank(client, auth_headers, own_bank):
+    r = client.put(f"/api/question-banks/{own_bank}", json={
         "title": "更新后的题库", "description": "新描述",
     }, headers=auth_headers)
     assert r.status_code == 200
@@ -1079,12 +1164,16 @@ def test_41_update_bank(client, auth_headers):
     assert r.json()["description"] == "新描述"
 
 
-def test_42_export_bank(client, auth_headers):
-    r = client.get(f"/api/question-banks/{state.bank_id}/export", headers=auth_headers)
+def test_42_export_bank(client, auth_headers, own_bank):
+    r = client.put(f"/api/question-banks/{own_bank}", json={
+        "title": "更新后的题库", "description": "新描述",
+    }, headers=auth_headers)
+    assert r.status_code == 200
+    r = client.get(f"/api/question-banks/{own_bank}/export", headers=auth_headers)
     assert r.status_code == 200
     data = r.json()
     assert data["title"] == "更新后的题库"
-    assert len(data["questions"]) >= 8
+    assert len(data["questions"]) == 5
     export_question = data["questions"][0]
     assert "type" in export_question
     assert "content" in export_question
@@ -1113,12 +1202,12 @@ BRACKET_ANSWER_BANK = {
 def test_bracket_answer_import(client, auth_headers):
     r = client.post("/api/question-banks/import", json=BRACKET_ANSWER_BANK, headers=auth_headers)
     assert r.status_code == 201, f"导入失败: {r.text}"
-    state._bracket_bank_id = r.json()["id"]
 
 
 def test_bracket_answer_submit_correct(client, auth_headers):
+    bracket_bank_id = _import_bank(client, auth_headers, BRACKET_ANSWER_BANK)
     r = client.post("/api/exam/start", json={
-        "bank_ids": [state._bracket_bank_id], "mode": "sequential",
+        "bank_ids": [bracket_bank_id], "mode": "sequential",
     }, headers=auth_headers)
     assert r.status_code == 200
     exam_id = r.json()["exam_id"]
@@ -1134,8 +1223,9 @@ def test_bracket_answer_submit_correct(client, auth_headers):
 
 
 def test_bracket_answer_submit_wrong(client, auth_headers):
+    bracket_bank_id = _import_bank(client, auth_headers, BRACKET_ANSWER_BANK)
     r = client.post("/api/exam/start", json={
-        "bank_ids": [state._bracket_bank_id], "mode": "sequential",
+        "bank_ids": [bracket_bank_id], "mode": "sequential",
     }, headers=auth_headers)
     assert r.status_code == 200
     exam_id = r.json()["exam_id"]
@@ -1151,7 +1241,8 @@ def test_bracket_answer_submit_wrong(client, auth_headers):
 
 
 def test_bracket_answer_update_question(client, auth_headers):
-    r = client.get(f"/api/question-banks/{state._bracket_bank_id}", headers=auth_headers)
+    bracket_bank_id = _import_bank(client, auth_headers, BRACKET_ANSWER_BANK)
+    r = client.get(f"/api/question-banks/{bracket_bank_id}", headers=auth_headers)
     assert r.status_code == 200
     questions = r.json()["questions"]
     q = next(q for q in questions if q["content"] == "氢离子的化学式是____")
@@ -1164,24 +1255,14 @@ def test_bracket_answer_update_question(client, auth_headers):
 
 
 def test_bracket_answer_export(client, auth_headers):
-    r = client.get(f"/api/question-banks/{state._bracket_bank_id}/export", headers=auth_headers)
+    bracket_bank_id = _import_bank(client, auth_headers, BRACKET_ANSWER_BANK)
+    r = client.get(f"/api/question-banks/{bracket_bank_id}/export", headers=auth_headers)
     assert r.status_code == 200
     data = r.json()
     answers = {q["content"]: q["answer"] for q in data["questions"]}
     assert answers["氢离子的化学式是____"] == "[H⁺]"
     assert answers["铁氰化钾的化学式是____"] == "[Fe(CN)₆]⁴⁻"
     assert answers["两个数字"] == ["1", "2"]
-    client.delete(f"/api/question-banks/{state._bracket_bank_id}", headers=auth_headers)
-
-
-# ── Test: 完整恢复初始数据 ──
-
-
-def test_44_cleanup_restore_bank(client, auth_headers):
-    r = client.put(f"/api/question-banks/{state.bank_id}", json={
-        "title": "测试题库",
-    }, headers=auth_headers)
-    assert r.status_code == 200
 
 
 # ── Test: JWT hardening ──
@@ -1338,27 +1419,27 @@ def test_53_import_rejects_multiple_duplicate_answer(client, auth_headers):
     assert "重复" in r.text
 
 
-def test_54_create_question_rejects_choice_answer_not_in_options(client, auth_headers):
+def test_54_create_question_rejects_choice_answer_not_in_options(client, auth_headers, bank_id):
     """新建选择题答案不属于现有选项时返回 400（issue #42）"""
-    r = client.post(f"/api/question-banks/{state.bank_id}/questions", json={
+    r = client.post(f"/api/question-banks/{bank_id}/questions", json={
         "type": "choice", "content": "test", "options": ["1", "2"], "answer": "D",
     }, headers=auth_headers)
     assert r.status_code == 400
     assert "不属于现有选项" in r.text
 
 
-def test_55_create_question_rejects_multiple_answer_not_in_options(client, auth_headers):
+def test_55_create_question_rejects_multiple_answer_not_in_options(client, auth_headers, bank_id):
     """新建多选题答案含超出选项范围的标签时返回 400（issue #42）"""
-    r = client.post(f"/api/question-banks/{state.bank_id}/questions", json={
+    r = client.post(f"/api/question-banks/{bank_id}/questions", json={
         "type": "multiple", "content": "test", "options": ["1", "2"], "answer": ["A", "C"],
     }, headers=auth_headers)
     assert r.status_code == 400
     assert "不属于现有选项" in r.text
 
 
-def test_56_update_question_rejects_choice_answer_not_in_options(client, auth_headers):
+def test_56_update_question_rejects_choice_answer_not_in_options(client, auth_headers, own_bank):
     """编辑选择题答案不属于现有选项时返回 400（issue #42）"""
-    r = client.post(f"/api/question-banks/{state.bank_id}/questions", json={
+    r = client.post(f"/api/question-banks/{own_bank}/questions", json={
         "type": "choice", "content": "合法题", "options": ["1", "2"], "answer": "A",
     }, headers=auth_headers)
     assert r.status_code == 201
@@ -1441,8 +1522,8 @@ def test_60_import_multiple_rejects_blank_option(client, auth_headers):
             break
 
 
-def test_61_create_question_rejects_blank_option(client, auth_headers):
-    r = client.post(f"/api/question-banks/{state.bank_id}/questions", json={
+def test_61_create_question_rejects_blank_option(client, auth_headers, bank_id):
+    r = client.post(f"/api/question-banks/{bank_id}/questions", json={
         "type": "choice", "content": "新建空白选项",
         "options": ["1", "  "], "answer": "A",
     }, headers=auth_headers)
@@ -1450,8 +1531,8 @@ def test_61_create_question_rejects_blank_option(client, auth_headers):
     assert "空白" in r.text
 
 
-def test_62_update_question_rejects_blank_option(client, auth_headers):
-    r = client.post(f"/api/question-banks/{state.bank_id}/questions", json={
+def test_62_update_question_rejects_blank_option(client, auth_headers, own_bank):
+    r = client.post(f"/api/question-banks/{own_bank}/questions", json={
         "type": "choice", "content": "待更新空白选项",
         "options": ["1", "2"], "answer": "A",
     }, headers=auth_headers)
@@ -1467,10 +1548,10 @@ def test_62_update_question_rejects_blank_option(client, auth_headers):
 # ── Test: submit_answer 拒绝负耗时（issue #41）──
 
 
-def test_63_submit_answer_rejects_negative_duration(client, auth_headers):
+def test_63_submit_answer_rejects_negative_duration(client, auth_headers, bank_id):
     """time_spent_seconds 为负数时应在请求解析阶段被拒为 422，不污染考试统计（issue #41）"""
     r = client.post("/api/exam/start", json={
-        "bank_ids": [state.bank_id], "mode": "sequential",
+        "bank_ids": [bank_id], "mode": "sequential",
         "types": ["choice", "fill", "judge", "multiple"],
         "choice_timeout": 30, "judge_fill_timeout": 60,
     }, headers=auth_headers)
@@ -1504,19 +1585,9 @@ def test_63_submit_answer_rejects_negative_duration(client, auth_headers):
 # ── Test: submit_answer 校验提交答案选项范围（issue #55）──
 
 
-def _ensure_test_bank(client, auth_headers):
-    if state.bank_id is not None:
-        return
-    data = {**BANK_DATA, "title": f"提交答案校验-{uuid.uuid4().hex[:8]}"}
-    r = client.post("/api/question-banks/import", json=data, headers=auth_headers)
-    assert r.status_code == 201, f"导入失败: {r.text}"
-    state.bank_id = r.json()["id"]
-
-
-def _start_exam_question(client, auth_headers, question_type):
-    _ensure_test_bank(client, auth_headers)
+def _start_exam_question(client, auth_headers, bank_id, question_type):
     r = client.post("/api/exam/start", json={
-        "bank_ids": [state.bank_id], "mode": "sequential",
+        "bank_ids": [bank_id], "mode": "sequential",
         "types": [question_type],
         "choice_timeout": 30, "judge_fill_timeout": 60,
     }, headers=auth_headers)
@@ -1533,9 +1604,9 @@ def _assert_exam_has_no_answers(client, auth_headers, exam_id):
     assert r.json()["answers"] == []
 
 
-def test_64_submit_answer_rejects_invalid_choice_option(client, auth_headers):
+def test_64_submit_answer_rejects_invalid_choice_option(client, auth_headers, bank_id):
     """选择题提交不存在的选项标签时返回 400，且不写入答题记录（issue #55）"""
-    exam_id, qid = _start_exam_question(client, auth_headers, "choice")
+    exam_id, qid = _start_exam_question(client, auth_headers, bank_id, "choice")
     r = client.post(f"/api/exam/{exam_id}/answer", json={
         "exam_id": exam_id, "question_id": qid,
         "user_answer": "Z", "time_spent_seconds": 3,
@@ -1545,9 +1616,9 @@ def test_64_submit_answer_rejects_invalid_choice_option(client, auth_headers):
     _assert_exam_has_no_answers(client, auth_headers, exam_id)
 
 
-def test_65_submit_answer_rejects_invalid_choice_answer_type(client, auth_headers):
+def test_65_submit_answer_rejects_invalid_choice_answer_type(client, auth_headers, bank_id):
     """选择题提交列表答案时返回明确错误，避免落到选项不存在分支（issue #55）"""
-    exam_id, qid = _start_exam_question(client, auth_headers, "choice")
+    exam_id, qid = _start_exam_question(client, auth_headers, bank_id, "choice")
     r = client.post(f"/api/exam/{exam_id}/answer", json={
         "exam_id": exam_id, "question_id": qid,
         "user_answer": ["A"], "time_spent_seconds": 3,
@@ -1557,9 +1628,9 @@ def test_65_submit_answer_rejects_invalid_choice_answer_type(client, auth_header
     _assert_exam_has_no_answers(client, auth_headers, exam_id)
 
 
-def test_66_submit_answer_rejects_invalid_judge_answer(client, auth_headers):
+def test_66_submit_answer_rejects_invalid_judge_answer(client, auth_headers, bank_id):
     """判断题只接受“对”或“错”（issue #55）"""
-    exam_id, qid = _start_exam_question(client, auth_headers, "judge")
+    exam_id, qid = _start_exam_question(client, auth_headers, bank_id, "judge")
     r = client.post(f"/api/exam/{exam_id}/answer", json={
         "exam_id": exam_id, "question_id": qid,
         "user_answer": "A", "time_spent_seconds": 3,
@@ -1569,9 +1640,9 @@ def test_66_submit_answer_rejects_invalid_judge_answer(client, auth_headers):
     _assert_exam_has_no_answers(client, auth_headers, exam_id)
 
 
-def test_67_submit_answer_rejects_invalid_multiple_answer(client, auth_headers):
+def test_67_submit_answer_rejects_invalid_multiple_answer(client, auth_headers, bank_id):
     """多选题拒绝重复答案和不存在的选项标签（issue #55）"""
-    exam_id, qid = _start_exam_question(client, auth_headers, "multiple")
+    exam_id, qid = _start_exam_question(client, auth_headers, bank_id, "multiple")
     r = client.post(f"/api/exam/{exam_id}/answer", json={
         "exam_id": exam_id, "question_id": qid,
         "user_answer": ["A", "A"], "time_spent_seconds": 3,
@@ -1589,9 +1660,9 @@ def test_67_submit_answer_rejects_invalid_multiple_answer(client, auth_headers):
     _assert_exam_has_no_answers(client, auth_headers, exam_id)
 
 
-def test_68_submit_answer_allows_null_answer(client, auth_headers):
+def test_68_submit_answer_allows_null_answer(client, auth_headers, bank_id):
     """空答案仍允许提交，用于保留跳过/未作答的兼容行为（issue #55）"""
-    exam_id, qid = _start_exam_question(client, auth_headers, "choice")
+    exam_id, qid = _start_exam_question(client, auth_headers, bank_id, "choice")
     r = client.post(f"/api/exam/{exam_id}/answer", json={
         "exam_id": exam_id, "question_id": qid,
         "user_answer": None, "time_spent_seconds": 3,
@@ -1602,10 +1673,10 @@ def test_68_submit_answer_allows_null_answer(client, auth_headers):
 # ── Test: 题型空列表过滤（issue #77）──
 
 
-def test_69b_exam_start_empty_types_returns_400(client, auth_headers):
+def test_69b_exam_start_empty_types_returns_400(client, auth_headers, bank_id):
     """types=[] 应返回 400（空集合匹配不到任何题型），而非泄漏全部题型"""
     r = client.post("/api/exam/start", json={
-        "bank_ids": [state.bank_id], "mode": "sequential",
+        "bank_ids": [bank_id], "mode": "sequential",
         "types": [],
         "choice_timeout": 30, "judge_fill_timeout": 60,
     }, headers=auth_headers)
@@ -1613,20 +1684,20 @@ def test_69b_exam_start_empty_types_returns_400(client, auth_headers):
     assert "没有符合条件的题目" in r.text
 
 
-def test_70b_review_empty_types_returns_empty(client, auth_headers):
+def test_70b_review_empty_types_returns_empty(client, auth_headers, bank_id):
     """types=[] 应返回空列表，而非泄漏全部题型"""
     r = client.post("/api/review/questions", json={
-        "bank_ids": [state.bank_id],
+        "bank_ids": [bank_id],
         "types": [],
     }, headers=auth_headers)
     assert r.status_code == 200
     assert r.json() == []
 
 
-def test_71b_review_null_types_returns_all(client, auth_headers):
+def test_71b_review_null_types_returns_all(client, auth_headers, bank_id):
     """types 未传（None）应保持向后兼容，返回全部题型"""
     r = client.post("/api/review/questions", json={
-        "bank_ids": [state.bank_id],
+        "bank_ids": [bank_id],
     }, headers=auth_headers)
     assert r.status_code == 200
     assert len(r.json()) >= 1
@@ -1635,10 +1706,10 @@ def test_71b_review_null_types_returns_all(client, auth_headers):
 # ── Test: 章节空列表过滤（issue #91）──
 
 
-def test_69_exam_start_empty_chapters_returns_400(client, auth_headers):
+def test_69_exam_start_empty_chapters_returns_400(client, auth_headers, bank_id):
     """chapters=[] 应返回 400（空集合匹配不到任何题目），而非泄漏全部章节"""
     r = client.post("/api/exam/start", json={
-        "bank_ids": [state.bank_id], "mode": "sequential",
+        "bank_ids": [bank_id], "mode": "sequential",
         "chapters": [],
         "choice_timeout": 30, "judge_fill_timeout": 60,
     }, headers=auth_headers)
@@ -1646,20 +1717,20 @@ def test_69_exam_start_empty_chapters_returns_400(client, auth_headers):
     assert "没有符合条件的题目" in r.text
 
 
-def test_70_review_empty_chapters_returns_empty(client, auth_headers):
+def test_70_review_empty_chapters_returns_empty(client, auth_headers, bank_id):
     """chapters=[] 应返回空列表，而非泄漏全部章节"""
     r = client.post("/api/review/questions", json={
-        "bank_ids": [state.bank_id],
+        "bank_ids": [bank_id],
         "chapters": [],
     }, headers=auth_headers)
     assert r.status_code == 200
     assert r.json() == []
 
 
-def test_71_review_null_chapters_returns_all(client, auth_headers):
+def test_71_review_null_chapters_returns_all(client, auth_headers, bank_id):
     """chapters 未传（None）应保持向后兼容，返回全部章节题目"""
     r = client.post("/api/review/questions", json={
-        "bank_ids": [state.bank_id],
+        "bank_ids": [bank_id],
     }, headers=auth_headers)
     assert r.status_code == 200
     assert len(r.json()) >= 1
@@ -1681,12 +1752,12 @@ QUOTE_CHAPTER_BANK = {
 def test_77_quote_chapter_import(client, auth_headers):
     r = client.post("/api/question-banks/import", json=QUOTE_CHAPTER_BANK, headers=auth_headers)
     assert r.status_code == 201, f"导入失败: {r.text}"
-    state._quote_bank_id = r.json()["id"]
 
 
 def test_78_quote_chapter_review_chapters(client, auth_headers):
+    quote_bank_id = _import_bank(client, auth_headers, QUOTE_CHAPTER_BANK)
     r = client.post("/api/review/chapters", json={
-        "bank_ids": [state._quote_bank_id],
+        "bank_ids": [quote_bank_id],
     }, headers=auth_headers)
     assert r.status_code == 200
     chapters = r.json()
@@ -1694,8 +1765,9 @@ def test_78_quote_chapter_review_chapters(client, auth_headers):
 
 
 def test_79_quote_chapter_exam_start_filter(client, auth_headers):
+    quote_bank_id = _import_bank(client, auth_headers, QUOTE_CHAPTER_BANK)
     r = client.post("/api/exam/start", json={
-        "bank_ids": [state._quote_bank_id], "mode": "sequential",
+        "bank_ids": [quote_bank_id], "mode": "sequential",
         "chapters": ["第\"一\"章"],
     }, headers=auth_headers)
     assert r.status_code == 200
@@ -1709,8 +1781,9 @@ def test_79_quote_chapter_exam_start_filter(client, auth_headers):
 
 
 def test_80_quote_chapter_review_questions_filter(client, auth_headers):
+    quote_bank_id = _import_bank(client, auth_headers, QUOTE_CHAPTER_BANK)
     r = client.post("/api/review/questions", json={
-        "bank_ids": [state._quote_bank_id],
+        "bank_ids": [quote_bank_id],
         "chapters": ["第\"一\"章"],
     }, headers=auth_headers)
     assert r.status_code == 200
@@ -1718,10 +1791,6 @@ def test_80_quote_chapter_review_questions_filter(client, auth_headers):
     assert len(questions) == 2, f"背题模式按双引号章节筛选应返回 2 题，实际 {len(questions)}"
     for q in questions:
         assert q["chapter"] == "第\"一\"章"
-
-
-def test_81_quote_chapter_cleanup(client, auth_headers):
-    client.delete(f"/api/question-banks/{state._quote_bank_id}", headers=auth_headers)
 
 
 # ── Test: 选择题/多选题选项上限 8 个（issue #53）──
@@ -1776,8 +1845,8 @@ def test_71_import_multiple_rejects_choice_with_nine_options(client, auth_header
             break
 
 
-def test_72_create_rejects_choice_with_nine_options(client, auth_headers):
-    r = client.post(f"/api/question-banks/{state.bank_id}/questions", json={
+def test_72_create_rejects_choice_with_nine_options(client, auth_headers, bank_id):
+    r = client.post(f"/api/question-banks/{bank_id}/questions", json={
         "type": "choice", "content": "9选项选择题",
         "options": _make_options(9), "answer": "I",
     }, headers=auth_headers)
@@ -1785,8 +1854,8 @@ def test_72_create_rejects_choice_with_nine_options(client, auth_headers):
     assert "不能超过 8 个" in r.text
 
 
-def test_73_create_rejects_multiple_with_nine_options(client, auth_headers):
-    r = client.post(f"/api/question-banks/{state.bank_id}/questions", json={
+def test_73_create_rejects_multiple_with_nine_options(client, auth_headers, bank_id):
+    r = client.post(f"/api/question-banks/{bank_id}/questions", json={
         "type": "multiple", "content": "9选项多选题",
         "options": _make_options(9), "answer": ["A", "I"],
     }, headers=auth_headers)
@@ -1794,8 +1863,8 @@ def test_73_create_rejects_multiple_with_nine_options(client, auth_headers):
     assert "不能超过 8 个" in r.text
 
 
-def test_74_update_rejects_choice_with_nine_options(client, auth_headers):
-    r = client.post(f"/api/question-banks/{state.bank_id}/questions", json={
+def test_74_update_rejects_choice_with_nine_options(client, auth_headers, own_bank):
+    r = client.post(f"/api/question-banks/{own_bank}/questions", json={
         "type": "choice", "content": "待更新9选项",
         "options": _make_options(2), "answer": "A",
     }, headers=auth_headers)
@@ -1809,8 +1878,8 @@ def test_74_update_rejects_choice_with_nine_options(client, auth_headers):
     client.delete(f"/api/questions/{qid}", headers=auth_headers)
 
 
-def test_75_update_rejects_multiple_with_nine_options(client, auth_headers):
-    r = client.post(f"/api/question-banks/{state.bank_id}/questions", json={
+def test_75_update_rejects_multiple_with_nine_options(client, auth_headers, own_bank):
+    r = client.post(f"/api/question-banks/{own_bank}/questions", json={
         "type": "multiple", "content": "待更新9选项多选",
         "options": _make_options(2), "answer": ["A", "B"],
     }, headers=auth_headers)
@@ -1870,10 +1939,10 @@ def test_76_eight_options_allowed_across_all_entrypoints(client, auth_headers):
 # ── Test: 单空填空题提交数组答案返回 400 而非 500（issue #114）──
 
 
-def test_77_submit_answer_rejects_list_for_single_blank_fill(client, auth_headers):
+def test_77_submit_answer_rejects_list_for_single_blank_fill(client, auth_headers, bank_id):
     """单空填空题（answer 为字符串）提交数组答案时返回 400，且不写入答题记录（issue #114）"""
     # sequential 按 (bank_id, sort_order, id) 排序，首题即 BANK_DATA 中的单空题「中国的首都是____」
-    exam_id, qid = _start_exam_question(client, auth_headers, "fill")
+    exam_id, qid = _start_exam_question(client, auth_headers, bank_id, "fill")
     r = client.post(f"/api/exam/{exam_id}/answer", json={
         "exam_id": exam_id, "question_id": qid,
         "user_answer": ["北京", "上海"], "time_spent_seconds": 1,
@@ -1894,10 +1963,9 @@ def test_77_submit_answer_rejects_list_for_single_blank_fill(client, auth_header
 # ── Test: 编辑时显式 null 清空章节/解析/描述（issue #112）──
 
 
-def test_78_update_question_null_clears_chapter_and_analysis(client, auth_headers):
+def test_78_update_question_null_clears_chapter_and_analysis(client, auth_headers, own_bank):
     """编辑题目显式传 null 时清空章节与解析，并持久化（issue #112）"""
-    _ensure_test_bank(client, auth_headers)
-    r = client.post(f"/api/question-banks/{state.bank_id}/questions", json={
+    r = client.post(f"/api/question-banks/{own_bank}/questions", json={
         "type": "judge", "content": "清空字段测试题", "chapter": "第一章",
         "answer": "对", "analysis": "原解析",
     }, headers=auth_headers)
@@ -1914,17 +1982,15 @@ def test_78_update_question_null_clears_chapter_and_analysis(client, auth_header
     assert r.json()["analysis"] is None, f"analysis 应被清空: {r.text}"
 
     # 重新读取确认已持久化
-    r = client.get(f"/api/question-banks/{state.bank_id}", headers=auth_headers)
+    r = client.get(f"/api/question-banks/{own_bank}", headers=auth_headers)
     q = next(x for x in r.json()["questions"] if x["id"] == qid)
     assert q["chapter"] is None
     assert q["analysis"] is None
-    client.delete(f"/api/questions/{qid}", headers=auth_headers)
 
 
-def test_79_update_question_omitted_fields_keep_old_values(client, auth_headers):
+def test_79_update_question_omitted_fields_keep_old_values(client, auth_headers, own_bank):
     """请求体中省略 chapter/analysis 键时保留旧值，向后兼容（issue #112）"""
-    _ensure_test_bank(client, auth_headers)
-    r = client.post(f"/api/question-banks/{state.bank_id}/questions", json={
+    r = client.post(f"/api/question-banks/{own_bank}/questions", json={
         "type": "judge", "content": "省略字段测试题", "chapter": "第二章",
         "answer": "错", "analysis": "解析保留",
     }, headers=auth_headers)
@@ -1935,7 +2001,6 @@ def test_79_update_question_omitted_fields_keep_old_values(client, auth_headers)
     assert r.status_code == 200
     assert r.json()["chapter"] == "第二章"
     assert r.json()["analysis"] == "解析保留"
-    client.delete(f"/api/questions/{qid}", headers=auth_headers)
 
 
 def test_80_update_bank_description_null_clears_omitted_keeps(client, auth_headers):
@@ -1967,9 +2032,9 @@ def test_80_update_bank_description_null_clears_omitted_keeps(client, auth_heade
 # ── issue #115: 整卷计时暂停时长不计入总用时 ──
 
 
-def _start_elapsed_exam(client, auth_headers):
+def _start_elapsed_exam(client, auth_headers, bank_id):
     r = client.post("/api/exam/start", json={
-        "bank_ids": [state.bank_id], "mode": "sequential",
+        "bank_ids": [bank_id], "mode": "sequential",
         "types": ["choice", "fill", "judge", "multiple"],
         "choice_timeout": 30, "judge_fill_timeout": 60,
         "timer_mode": "elapsed",
@@ -1992,9 +2057,9 @@ def _backdate_exam_start(exam_id: int, seconds: int):
         db.close()
 
 
-def test_115a_finish_elapsed_uses_client_elapsed(client, auth_headers):
+def test_115a_finish_elapsed_uses_client_elapsed(client, auth_headers, bank_id):
     """整卷计时手动结束：duration 采用前端计时器口径（不含暂停），不再取墙钟差（issue #115）"""
-    exam_id = _start_elapsed_exam(client, auth_headers)
+    exam_id = _start_elapsed_exam(client, auth_headers, bank_id)
     _backdate_exam_start(exam_id, 600)  # 墙钟已过 600s，其中含暂停时长
     r = client.post(f"/api/exam/{exam_id}/finish", json={"elapsed_seconds": 120}, headers=auth_headers)
     assert r.status_code == 200, r.text
@@ -2002,18 +2067,18 @@ def test_115a_finish_elapsed_uses_client_elapsed(client, auth_headers):
     assert duration == 120, f"应采用前端上报的 120s，实际 {duration}"
 
 
-def test_115b_finish_elapsed_clamped_by_wall_clock(client, auth_headers):
+def test_115b_finish_elapsed_clamped_by_wall_clock(client, auth_headers, bank_id):
     """上报值超过墙钟差时按墙钟封顶，防止伪造超长用时（issue #115）"""
-    exam_id = _start_elapsed_exam(client, auth_headers)
+    exam_id = _start_elapsed_exam(client, auth_headers, bank_id)
     r = client.post(f"/api/exam/{exam_id}/finish", json={"elapsed_seconds": 99999}, headers=auth_headers)
     assert r.status_code == 200, r.text
     duration = client.get(f"/api/exam/{exam_id}/result", headers=auth_headers).json()["duration_seconds"]
     assert duration <= 5, f"上报值超出墙钟差应被封顶，实际 {duration}"
 
 
-def test_115c_finish_elapsed_fallback_wall_clock(client, auth_headers):
+def test_115c_finish_elapsed_fallback_wall_clock(client, auth_headers, bank_id):
     """不上报 elapsed_seconds（旧客户端）时回退墙钟差值，保持兼容"""
-    exam_id = _start_elapsed_exam(client, auth_headers)
+    exam_id = _start_elapsed_exam(client, auth_headers, bank_id)
     _backdate_exam_start(exam_id, 100)
     r = client.post(f"/api/exam/{exam_id}/finish", json={}, headers=auth_headers)
     assert r.status_code == 200, r.text
@@ -2021,16 +2086,16 @@ def test_115c_finish_elapsed_fallback_wall_clock(client, auth_headers):
     assert 98 <= duration <= 105, f"未上报时应为墙钟差约 100s，实际 {duration}"
 
 
-def test_115d_finish_rejects_negative_elapsed(client, auth_headers):
+def test_115d_finish_rejects_negative_elapsed(client, auth_headers, bank_id):
     """负数 elapsed_seconds 应被 schema 校验拒绝"""
-    exam_id = _start_elapsed_exam(client, auth_headers)
+    exam_id = _start_elapsed_exam(client, auth_headers, bank_id)
     r = client.post(f"/api/exam/{exam_id}/finish", json={"elapsed_seconds": -1}, headers=auth_headers)
     assert r.status_code == 422, f"负数应返回 422: {r.status_code}"
 
 
-def test_115e_last_answer_uses_client_elapsed(client, auth_headers):
+def test_115e_last_answer_uses_client_elapsed(client, auth_headers, bank_id):
     """提交最后一题自动结束路径同样采用前端口径的 elapsed_seconds（issue #115）"""
-    exam_id = _start_elapsed_exam(client, auth_headers)
+    exam_id = _start_elapsed_exam(client, auth_headers, bank_id)
     _backdate_exam_start(exam_id, 600)
     total = client.get(f"/api/exam/{exam_id}/current", headers=auth_headers).json()["total_count"]
     for _ in range(total):
@@ -2051,10 +2116,10 @@ def test_115e_last_answer_uses_client_elapsed(client, auth_headers):
 # ── issue #111: 回看已作答题目答案返回真实数组而非 Python repr ──
 
 
-def test_111a_current_answered_multiple_returns_json_arrays(client, auth_headers):
+def test_111a_current_answered_multiple_returns_json_arrays(client, auth_headers, bank_id):
     """回看已作答多选题，user_answer/correct_answer 应为 JSON 数组而非 Python repr 字符串（issue #111）"""
     r = client.post("/api/exam/start", json={
-        "bank_ids": [state.bank_id], "mode": "sequential", "types": ["multiple"],
+        "bank_ids": [bank_id], "mode": "sequential", "types": ["multiple"],
         "choice_timeout": 30, "judge_fill_timeout": 60,
     }, headers=auth_headers)
     assert r.status_code == 200, r.text
@@ -2071,10 +2136,10 @@ def test_111a_current_answered_multiple_returns_json_arrays(client, auth_headers
     assert data["correct_answer"] == ["A", "B", "C", "D"], f"应为 JSON 数组，实际 {data['correct_answer']!r}"
 
 
-def test_111b_current_answered_choice_stays_string(client, auth_headers):
+def test_111b_current_answered_choice_stays_string(client, auth_headers, bank_id):
     """回看已作答选择题仍返回字符串答案，行为不变"""
     r = client.post("/api/exam/start", json={
-        "bank_ids": [state.bank_id], "mode": "sequential", "types": ["choice"],
+        "bank_ids": [bank_id], "mode": "sequential", "types": ["choice"],
         "choice_timeout": 30, "judge_fill_timeout": 60,
     }, headers=auth_headers)
     assert r.status_code == 200, r.text
@@ -2093,10 +2158,10 @@ def test_111b_current_answered_choice_stays_string(client, auth_headers):
 # ── issue #82: 未作答填空题返回 blank_count 安全元数据 ──
 
 
-def test_82a_current_unanswered_fill_exposes_blank_count(client, auth_headers):
+def test_82a_current_unanswered_fill_exposes_blank_count(client, auth_headers, bank_id):
     """未作答填空题 answer 仍隐藏，但返回 blank_count 供前端渲染空位数量（issue #82）"""
     r = client.post("/api/exam/start", json={
-        "bank_ids": [state.bank_id], "mode": "sequential", "types": ["fill"],
+        "bank_ids": [bank_id], "mode": "sequential", "types": ["fill"],
         "choice_timeout": 30, "judge_fill_timeout": 60,
     }, headers=auth_headers)
     assert r.status_code == 200, r.text
@@ -2109,10 +2174,10 @@ def test_82a_current_unanswered_fill_exposes_blank_count(client, auth_headers):
     assert sorted(blank_counts) == [1, 4], f"单空/多空应分别返回 1 和 4，实际 {blank_counts}"
 
 
-def test_82b_preview_unanswered_fill_exposes_blank_count(client, auth_headers):
+def test_82b_preview_unanswered_fill_exposes_blank_count(client, auth_headers, bank_id):
     """整卷预览未作答填空题同样返回 blank_count 且不泄露答案（issue #82）"""
     r = client.post("/api/exam/start", json={
-        "bank_ids": [state.bank_id], "mode": "sequential", "types": ["fill"],
+        "bank_ids": [bank_id], "mode": "sequential", "types": ["fill"],
         "choice_timeout": 30, "judge_fill_timeout": 60,
     }, headers=auth_headers)
     assert r.status_code == 200, r.text
@@ -2129,10 +2194,10 @@ def test_82b_preview_unanswered_fill_exposes_blank_count(client, auth_headers):
     assert single["blank_count"] == 1
 
 
-def test_82c_non_fill_blank_count_is_none(client, auth_headers):
+def test_82c_non_fill_blank_count_is_none(client, auth_headers, bank_id):
     """非填空题 blank_count 为 null，不影响其他题型"""
     r = client.post("/api/exam/start", json={
-        "bank_ids": [state.bank_id], "mode": "sequential", "types": ["choice"],
+        "bank_ids": [bank_id], "mode": "sequential", "types": ["choice"],
         "choice_timeout": 30, "judge_fill_timeout": 60,
     }, headers=auth_headers)
     assert r.status_code == 200, r.text
@@ -2373,16 +2438,6 @@ def test_81b_orphan_answer_without_snapshot_shows_placeholder(client, auth_heade
 # ── Test: 恢复未完成考试（issue #44）──
 
 
-def _register_isolated_user(client, prefix):
-    """注册独立用户，避免依赖前序测试留下的进行中考试；重置限流计数防 429"""
-    from routers.limiter import limiter
-    limiter._storage.reset()
-    suffix = uuid.uuid4().hex[:8]
-    r = client.post("/api/auth/register", json={"username": f"{prefix}_{suffix}", "password": "123456"})
-    assert r.status_code == 200, f"注册失败: {r.text}"
-    return {"Authorization": f"Bearer {r.json()['access_token']}"}
-
-
 def test_44_unfinished_requires_auth(client):
     r = client.get("/api/exam/unfinished")
     assert r.status_code == 401
@@ -2513,7 +2568,7 @@ def test_44_unfinished_bank_titles_ownership(client):
 # ── Test: 开考快照题库归属校验（issue #125）──
 
 
-def test_125_start_exam_stores_only_owned_bank_ids(client, auth_headers):
+def test_125_start_exam_stores_only_owned_bank_ids(client, auth_headers, bank_id):
     """携带他人题库 id 开考时，快照 bank_ids 只保留归属校验通过的自己的题库（issue #125）"""
     # 受害者注册并导入自己的题库
     r = client.post("/api/auth/register", json={"username": f"victim_{uuid.uuid4().hex[:8]}", "password": "123456"})
@@ -2525,7 +2580,7 @@ def test_125_start_exam_stores_only_owned_bank_ids(client, auth_headers):
 
     # 攻击者混入受害者的题库 id 开考，请求仍放行（保留既有宽松行为）
     r = client.post("/api/exam/start", json={
-        "bank_ids": [victim_bank_id, state.bank_id], "mode": "sequential",
+        "bank_ids": [victim_bank_id, bank_id], "mode": "sequential",
         "choice_timeout": 30, "judge_fill_timeout": 60,
     }, headers=auth_headers)
     assert r.status_code == 200, r.text
@@ -2542,7 +2597,7 @@ def test_125_start_exam_stores_only_owned_bank_ids(client, auth_headers):
     finally:
         db.close()
     assert victim_bank_id not in stored, f"快照混入他人题库 id：{stored}"
-    assert stored == [state.bank_id], f"快照应仅含自己的题库，实际 {stored}"
+    assert stored == [bank_id], f"快照应仅含自己的题库，实际 {stored}"
 
 
 # ── Test: 考试取题题库归属校验（issue #123）──
