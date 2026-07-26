@@ -81,8 +81,10 @@ async function checkAuth() {
   try {
     state.user = await api.me();
     return true;
-  } catch {
-    api.setToken(null);
+  } catch (err) {
+    // 只有服务端明确 401 才销毁本地凭证；网络层失败（fetch 抛错，无 err.status）
+    // 保留 token，服务恢复后刷新即可恢复会话（issue #156）
+    if (err.status === 401) api.setToken(null);
     return false;
   }
 }
