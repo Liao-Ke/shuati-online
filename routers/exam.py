@@ -256,6 +256,10 @@ def submit_answer(
         invalid = [a for a in data.user_answer if a not in valid_labels]
         if invalid:
             raise HTTPException(status_code=400, detail=f"无效选项：{', '.join(invalid)}")
+    elif question.type == "fill" and data.user_answer is not None:
+        # 仅校验单空题：多空题判分兼容字符串提交（前端对多空题只渲染单输入框，见 issue #82），不可拦截
+        if not isinstance(correct_answer, list) and not isinstance(data.user_answer, str):
+            raise HTTPException(status_code=400, detail="单空填空题答案必须为字符串")
 
     if question.type == "choice" or question.type == "judge":
         is_correct = data.user_answer == correct_answer
