@@ -382,6 +382,8 @@
 
 注意：`current_index` 为 1-based（第几题），`index` 查询参数为 0-based。
 
+`question.blank_count`：填空题空位数量（单空为 `1`，多空为空位数），非填空题为 `null`。未作答时 `answer` 被隐藏，前端依据该字段渲染对应数量的输入框（issue #82）。
+
 **响应 (200)——有下一题且未指定 index：**
 ```json
 {
@@ -396,7 +398,8 @@
     "options": "[\"1\", \"2\", \"3\", \"4\"]",
     "answer": null,
     "analysis": null,
-    "sort_order": 0
+    "sort_order": 0,
+    "blank_count": null
   },
   "is_answered": false,
   "user_answer": null,
@@ -514,11 +517,14 @@
       "analysis": "1+1=2",
       "user_answer": "B",
       "is_answered": true,
-      "is_correct": true
+      "is_correct": true,
+      "blank_count": null
     }
   ]
 }
 ```
+
+`blank_count` 含义与 `/current` 接口一致：填空题为空位数量，其余题型为 `null`（issue #82）。
 
 ---
 

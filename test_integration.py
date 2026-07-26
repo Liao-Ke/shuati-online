@@ -1863,3 +1863,54 @@ def test_76_eight_options_allowed_across_all_entrypoints(client, auth_headers):
         if b["title"] == "8选项上限-批量":
             client.delete(f"/api/question-banks/{b['id']}", headers=auth_headers)
             break
+
+
+# ── issue #82: 未作答填空题返回 blank_count 安全元数据 ──
+
+
+def test_82a_current_unanswered_fill_exposes_blank_count(client, auth_headers):
+    """未作答填空题 answer 仍隐藏，但返回 blank_count 供前端渲染空位数量（issue #82）"""
+    r = client.post("/api/exam/start", json={
+        "bank_ids": [state.bank_id], "mode": "sequential", "types": ["fill"],
+        "choice_timeout": 30, "judge_fill_timeout": 60,
+    }, headers=auth_headers)
+    assert r.status_code == 200, r.text
+    exam_id = r.json()["exam_id"]
+    blank_counts = []
+    for i in range(2):
+        q = client.get(f"/api/exam/{exam_id}/current?index={i}", headers=auth_headers).json()["question"]
+        assert q["answer"] is None, "未作答时不应泄露答案"
+        blank_counts.append(q["blank_count"])
+    assert sorted(blank_counts) == [1, 4], f"单空/多空应分别返回 1 和 4，实际 {blank_counts}"
+
+
+def test_82b_preview_unanswered_fill_exposes_blank_count(client, auth_headers):
+    """整卷预览未作答填空题同样返回 blank_count 且不泄露答案（issue #82）"""
+    r = client.post("/api/exam/start", json={
+        "bank_ids": [state.bank_id], "mode": "sequential", "types": ["fill"],
+        "choice_timeout": 30, "judge_fill_timeout": 60,
+    }, headers=auth_headers)
+    assert r.status_code == 200, r.text
+    exam_id = r.json()["exam_id"]
+    questions = client.get(f"/api/exam/{exam_id}/preview", headers=auth_headers).json()["questions"]
+    fills = [q for q in questions if q["type"] == "fill"]
+    assert fills, "应至少有一道填空题"
+    for q in fills:
+        assert q["answer"] is None, "未作答时不应泄露答案"
+        assert q["blank_count"] >= 1
+    multi = next(q for q in fills if "四大发明" in q["content"])
+    assert multi["blank_count"] == 4, f"多空题应返回 4，实际 {multi['blank_count']}"
+    single = next(q for q in fills if "首都" in q["content"])
+    assert single["blank_count"] == 1
+
+
+def test_82c_non_fill_blank_count_is_none(client, auth_headers):
+    """非填空题 blank_count 为 null，不影响其他题型"""
+    r = client.post("/api/exam/start", json={
+        "bank_ids": [state.bank_id], "mode": "sequential", "types": ["choice"],
+        "choice_timeout": 30, "judge_fill_timeout": 60,
+    }, headers=auth_headers)
+    assert r.status_code == 200, r.text
+    exam_id = r.json()["exam_id"]
+    q = client.get(f"/api/exam/{exam_id}/current", headers=auth_headers).json()["question"]
+    assert q["blank_count"] is None

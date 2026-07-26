@@ -50,6 +50,8 @@ class QuestionOut(BaseModel):
     answer: str | None = None
     analysis: str | None = None
     sort_order: int
+    # 填空题空位数量。answer 被隐藏时前端仍需按空位数渲染输入框（issue #82）
+    blank_count: int | None = None
 
     class Config:
         from_attributes = True
