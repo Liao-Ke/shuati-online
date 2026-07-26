@@ -2044,3 +2044,45 @@ def test_115e_last_answer_uses_client_elapsed(client, auth_headers):
             break
     duration = client.get(f"/api/exam/{exam_id}/result", headers=auth_headers).json()["duration_seconds"]
     assert duration == 45, f"自动结束应采用上报的 45s，实际 {duration}"
+
+
+# ── issue #111: 回看已作答题目答案返回真实数组而非 Python repr ──
+
+
+def test_111a_current_answered_multiple_returns_json_arrays(client, auth_headers):
+    """回看已作答多选题，user_answer/correct_answer 应为 JSON 数组而非 Python repr 字符串（issue #111）"""
+    r = client.post("/api/exam/start", json={
+        "bank_ids": [state.bank_id], "mode": "sequential", "types": ["multiple"],
+        "choice_timeout": 30, "judge_fill_timeout": 60,
+    }, headers=auth_headers)
+    assert r.status_code == 200, r.text
+    exam_id = r.json()["exam_id"]
+    q = client.get(f"/api/exam/{exam_id}/current", headers=auth_headers).json()["question"]
+    r = client.post(f"/api/exam/{exam_id}/answer", json={
+        "exam_id": exam_id, "question_id": q["id"],
+        "user_answer": ["A", "B"], "time_spent_seconds": 1,
+    }, headers=auth_headers)
+    assert r.status_code == 200, r.text
+    data = client.get(f"/api/exam/{exam_id}/current?index=0", headers=auth_headers).json()
+    assert data["is_answered"] is True
+    assert data["user_answer"] == ["A", "B"], f"应为 JSON 数组，实际 {data['user_answer']!r}"
+    assert data["correct_answer"] == ["A", "B", "C", "D"], f"应为 JSON 数组，实际 {data['correct_answer']!r}"
+
+
+def test_111b_current_answered_choice_stays_string(client, auth_headers):
+    """回看已作答选择题仍返回字符串答案，行为不变"""
+    r = client.post("/api/exam/start", json={
+        "bank_ids": [state.bank_id], "mode": "sequential", "types": ["choice"],
+        "choice_timeout": 30, "judge_fill_timeout": 60,
+    }, headers=auth_headers)
+    assert r.status_code == 200, r.text
+    exam_id = r.json()["exam_id"]
+    q = client.get(f"/api/exam/{exam_id}/current", headers=auth_headers).json()["question"]
+    r = client.post(f"/api/exam/{exam_id}/answer", json={
+        "exam_id": exam_id, "question_id": q["id"],
+        "user_answer": "A", "time_spent_seconds": 1,
+    }, headers=auth_headers)
+    assert r.status_code == 200, r.text
+    data = client.get(f"/api/exam/{exam_id}/current?index=0", headers=auth_headers).json()
+    assert data["user_answer"] == "A"
+    assert data["correct_answer"] == "B"

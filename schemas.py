@@ -102,9 +102,10 @@ class ExamCurrent(BaseModel):
     total_count: int
     question: QuestionOut | None = None
     is_answered: bool = False
-    user_answer: str | None = None
+    # 多选/多空填空答案为数组，与结果页/历史详情接口口径一致（issue #111）
+    user_answer: str | list[str] | None = None
     is_correct: bool | None = None
-    correct_answer: str | None = None
+    correct_answer: str | list[str] | None = None
 
 
 class AnswerSubmit(BaseModel):
