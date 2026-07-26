@@ -2283,3 +2283,86 @@ def test_43d_corrupt_question_ids_degrades_gracefully(client, auth_headers):
         assert r.status_code == 200, f"{path} 应优雅降级而非 500: {r.text}"
     r = client.get(f"/api/exam/{exam_id}/preview", headers=auth_headers)
     assert r.json()["total_count"] == 0, "损坏快照按空集过滤，应返回空考试"
+
+
+# ── Test: 删除题库后历史详情保留答案明细（issue #81） ──
+
+
+def _81_setup_completed_exam(client, auth_headers):
+    """导入 2 题的题库并完成一场考试，返回 (bank_id, exam_id)"""
+    suffix = uuid.uuid4().hex[:8]
+    r = client.post("/api/question-banks/import", json={
+        "title": f"快照测试_{suffix}", "description": "",
+        "questions": [
+            {"type": "choice", "content": "快照选择题", "options": ["甲", "乙"],
+             "answer": "B", "analysis": "选乙的原因"},
+            {"type": "fill", "content": "快照____填空____", "answer": ["多", "空"]},
+        ],
+    }, headers=auth_headers)
+    assert r.status_code == 201, r.text
+    bank_id = r.json()["id"]
+    r = client.post("/api/exam/start", json={
+        "bank_ids": [bank_id], "mode": "sequential",
+    }, headers=auth_headers)
+    exam_id = r.json()["exam_id"]
+    for _ in range(2):
+        q = client.get(f"/api/exam/{exam_id}/current", headers=auth_headers).json()["question"]
+        user_answer = "A" if q["type"] == "choice" else ["多", "空"]
+        r = client.post(f"/api/exam/{exam_id}/answer", json={
+            "exam_id": exam_id, "question_id": q["id"],
+            "user_answer": user_answer, "time_spent_seconds": 3,
+        }, headers=auth_headers)
+        assert r.status_code == 200, r.text
+    return bank_id, exam_id
+
+
+def test_81a_history_detail_survives_bank_deletion(client, auth_headers):
+    """删除题库后，历史详情通过答题快照保留题目内容与答案明细"""
+    bank_id, exam_id = _81_setup_completed_exam(client, auth_headers)
+    before = client.get(f"/api/history/{exam_id}", headers=auth_headers).json()
+    assert before["total_count"] == 2
+    assert len(before["answers"]) == 2
+
+    r = client.delete(f"/api/question-banks/{bank_id}", headers=auth_headers)
+    assert r.status_code == 204
+
+    after = client.get(f"/api/history/{exam_id}", headers=auth_headers).json()
+    assert after["total_count"] == 2
+    assert len(after["answers"]) == 2, "删除题库后明细数不应少于汇总数"
+    choice = next(a for a in after["answers"] if a["type"] == "choice")
+    assert choice["content"] == "快照选择题"
+    assert choice["options"] == ["甲", "乙"]
+    assert choice["correct_answer"] == "B"
+    assert choice["user_answer"] == "A"
+    assert choice["is_correct"] is False
+    assert choice["analysis"] == "选乙的原因"
+    assert choice["question_deleted"] is True
+    fill = next(a for a in after["answers"] if a["type"] == "fill")
+    assert fill["correct_answer"] == ["多", "空"]
+    assert fill["is_correct"] is True
+
+
+def test_81b_orphan_answer_without_snapshot_shows_placeholder(client, auth_headers):
+    """无快照的历史孤儿记录（快照功能上线前的旧数据）显示占位而非静默跳过"""
+    bank_id, exam_id = _81_setup_completed_exam(client, auth_headers)
+    from database import SessionLocal
+    from models import AnswerRecord
+    db = SessionLocal()
+    try:
+        db.query(AnswerRecord).filter(AnswerRecord.exam_id == exam_id).update(
+            {AnswerRecord.question_snapshot: None}, synchronize_session=False
+        )
+        db.commit()
+    finally:
+        db.close()
+    r = client.delete(f"/api/question-banks/{bank_id}", headers=auth_headers)
+    assert r.status_code == 204
+
+    after = client.get(f"/api/history/{exam_id}", headers=auth_headers).json()
+    assert after["total_count"] == 2
+    assert len(after["answers"]) == 2, "无快照孤儿记录也不应静默跳过"
+    for a in after["answers"]:
+        assert a["question_deleted"] is True
+        assert a["content"] == "（题目已删除，仅保留作答记录）"
+        assert a["correct_answer"] is None
+        assert a["user_answer"] is not None

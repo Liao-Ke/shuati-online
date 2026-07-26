@@ -301,8 +301,14 @@ def submit_answer(
         is_correct = False
 
     user_answer_str = json.dumps(data.user_answer, ensure_ascii=False) if isinstance(data.user_answer, list) else (data.user_answer or "")
+    # 题目快照：题目/题库删除后历史详情回退此快照展示（issue #81）
+    snapshot_str = json.dumps({
+        "type": question.type, "chapter": question.chapter, "content": question.content,
+        "options": options, "correct_answer": correct_answer, "analysis": question.analysis,
+    }, ensure_ascii=False)
     record = AnswerRecord(
         exam_id=exam.id, question_id=question.id,
+        question_snapshot=snapshot_str,
         user_answer=user_answer_str, is_correct=is_correct,
         time_spent_seconds=data.time_spent_seconds,
     )
@@ -431,20 +437,36 @@ def exam_result(exam_id: int, user: User = Depends(get_current_user), db: Sessio
     result_answers = []
     for a in answers:
         q = questions_map.get(a.question_id)
-        if not q:
-            continue
-        correct_answer = parse_answer(q.answer, q.type)
         user_answer = parse_json_field(a.user_answer)
+        if q:
+            result_answers.append({
+                "question_id": q.id,
+                "type": q.type,
+                "content": q.content,
+                "options": parse_json_field(q.options),
+                "correct_answer": parse_answer(q.answer, q.type),
+                "user_answer": user_answer,
+                "is_correct": a.is_correct,
+                "time_spent": a.time_spent_seconds,
+                "analysis": q.analysis,
+            })
+            continue
+        # 题目已删除：回退作答时的快照；无快照的历史孤儿记录给占位，避免汇总数与明细数不一致（issue #81）
+        try:
+            snap = json.loads(a.question_snapshot) if a.question_snapshot else {}
+        except (json.JSONDecodeError, TypeError):
+            snap = {}
         result_answers.append({
-            "question_id": q.id,
-            "type": q.type,
-            "content": q.content,
-            "options": parse_json_field(q.options),
-            "correct_answer": correct_answer,
+            "question_id": a.question_id,
+            "type": snap.get("type"),
+            "content": snap.get("content") or "（题目已删除，仅保留作答记录）",
+            "options": snap.get("options"),
+            "correct_answer": snap.get("correct_answer"),
             "user_answer": user_answer,
             "is_correct": a.is_correct,
             "time_spent": a.time_spent_seconds,
-            "analysis": q.analysis,
+            "analysis": snap.get("analysis"),
+            "question_deleted": True,
         })
 
     total = exam.correct_count + exam.wrong_count
