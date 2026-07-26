@@ -512,6 +512,8 @@ router.add('/exam', async () => {
   examElapsedOffset = parseInt(sessionStorage.getItem('examElapsedOffset')) || 0;
   if (examTimerMode === 'elapsed') startElapsedTimer();
   examProgress = await api.getExamProgress(examId);
+  // 刷新恢复时同步题目总数，否则 navigateExam 的边界判断恒 return（issue #110）
+  examTotalCount = examProgress.total_count;
   if (examCurrentIndex >= examProgress.total_count) examCurrentIndex = 0;
   renderQuestionGrid();
   if (examFullPreview) {
