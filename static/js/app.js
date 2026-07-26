@@ -74,6 +74,7 @@ let examTimerMode = 'per_question';
 let examStartedAt = null;
 let examElapsedInterval = null;
 let examElapsedOffset = 0;
+let unfinishedExams = [];
 
 async function checkAuth() {
   if (!api.token) return false;
@@ -192,12 +193,14 @@ router.add('/dashboard', async () => {
   showNav();
   render('<div class="text-center py-5"><div class="spinner-border"></div></div>');
   try {
-    const data = await api.getDashboard();
+    const [data, unfinished] = await Promise.all([api.getDashboard(), api.getUnfinishedExams()]);
+    unfinishedExams = unfinished;
     render(`
       <div class="page-header">
         <h2>欢迎回来，${escHtml(state.user.username)}</h2>
         <a href="#/exam/setup" class="btn btn-primary btn-lg">开始刷题</a>
       </div>
+      <div id="unfinished-exams"></div>
       <div class="row g-3 mb-4">
         <div class="col-6 col-md-3">
           <div class="stat-card"><div class="stat-number">${data.total_banks}</div><div class="stat-label">题库数</div></div>
@@ -215,12 +218,13 @@ router.add('/dashboard', async () => {
       <h3 class="mb-3">最近练习</h3>
       <div id="recent-exams"></div>
     `);
+    renderUnfinishedExams('unfinished-exams');
     const list = document.getElementById('recent-exams');
     if (data.recent_exams.length === 0) {
       list.innerHTML = '<p class="text-muted">还没有练习记录</p>';
     } else {
       data.recent_exams.forEach(ex => {
-        const date = new Date(ex.started_at).toLocaleString('zh-CN');
+        const date = parseUtcDate(ex.started_at).toLocaleString('zh-CN');
         const acc = (ex.accuracy * 100).toFixed(0);
         list.innerHTML += `
           <div class="history-item" onclick="router.navigate('/history/${ex.id}')">
@@ -350,13 +354,15 @@ router.add('/exam/setup', async () => {
   showNav();
   render('<div class="text-center py-5"><div class="spinner-border"></div></div>');
   try {
-    const banks = await api.getBanks();
+    const [banks, unfinished] = await Promise.all([api.getBanks(), api.getUnfinishedExams()]);
+    unfinishedExams = unfinished;
     if (banks.length === 0) {
       render('<div class="empty-state"><p>还没有题库</p><p class="text-muted">请先导入题库</p><a href="#/banks" class="btn btn-primary">去导入</a></div>');
       return;
     }
     render(`
       <div class="page-header"><h2>答题设置</h2></div>
+      <div id="unfinished-exams"></div>
       <div class="card mb-4"><div class="card-body">
         <h5>选择题库</h5>
         <div id="bank-select" class="row g-2"></div>
@@ -422,6 +428,7 @@ router.add('/exam/setup', async () => {
       </div></div>
       <button class="btn btn-primary btn-lg w-100" onclick="startExam()">开始答题</button>
     `);
+    renderUnfinishedExams('unfinished-exams');
     const bankSelect = document.getElementById('bank-select');
     banks.forEach(b => {
       bankSelect.innerHTML += `
@@ -515,6 +522,13 @@ router.add('/exam', async () => {
   // 刷新恢复时同步题目总数，否则 navigateExam 的边界判断恒 return（issue #110）
   examTotalCount = examProgress.total_count;
   if (examCurrentIndex >= examProgress.total_count) examCurrentIndex = 0;
+  // 跨会话恢复没有 examCurrentIndex 时，定位到第一道未答题（issue #44）
+  if (savedIdx === null) {
+    const answeredIdx = new Set(examProgress.answers.map(a => a.index));
+    for (let i = 0; i < examProgress.total_count; i++) {
+      if (!answeredIdx.has(i)) { examCurrentIndex = i; break; }
+    }
+  }
   renderQuestionGrid();
   if (examFullPreview) {
     document.getElementById('mode-toggle-btn').textContent = '📖 单题模式';
@@ -654,7 +668,7 @@ async function loadHistory(page) {
     const container = document.getElementById('history-list');
     if (container) {
       list.forEach(h => {
-        const date = new Date(h.started_at).toLocaleString('zh-CN');
+        const date = parseUtcDate(h.started_at).toLocaleString('zh-CN');
         const acc = (h.accuracy * 100).toFixed(0);
         container.innerHTML += `
           <div class="history-item" onclick="router.navigate('/history/${h.id}')">
@@ -1231,6 +1245,124 @@ function toggleBankSelect(el, ev) {
   updateExamChapters();
 }
 
+// ── 恢复未完成考试（issue #44）──
+
+// 后端存的是无时区后缀的 naive UTC 时间串，解析前补 Z，避免被按本地时区解释（差出时区偏移）
+function parseUtcDate(s) {
+  return new Date(s.endsWith('Z') ? s : s + 'Z');
+}
+
+// 渲染「继续未完成考试」卡片，dashboard 与答题设置页共用
+function renderUnfinishedExams(containerId) {
+  const el = document.getElementById(containerId);
+  if (!el) return;
+  if (unfinishedExams.length === 0) { el.innerHTML = ''; return; }
+  const items = unfinishedExams.map(ex => {
+    const date = parseUtcDate(ex.started_at).toLocaleString('zh-CN');
+    const banks = ex.bank_titles.map(escHtml).join('、') || '未知题库';
+    return `
+      <div class="d-flex justify-content-between align-items-center flex-wrap gap-2 py-2 border-top">
+        <div>
+          <div><strong>${banks}</strong></div>
+          <div class="text-muted small">${date} · ${ex.mode === 'random' ? '随机' : '顺序'}模式 · ${ex.timer_mode === 'elapsed' ? '整卷计时' : '单题计时'} · 已答 ${ex.answered_count}/${ex.total_count} 题</div>
+        </div>
+        <div class="text-nowrap">
+          <button class="btn btn-primary btn-sm" onclick="resumeUnfinishedExam(${ex.exam_id})">继续答题</button>
+          <button class="btn btn-outline-danger btn-sm ms-1" onclick="abandonUnfinishedExam(${ex.exam_id})">放弃</button>
+        </div>
+      </div>`;
+  }).join('');
+  el.innerHTML = `
+    <div class="card mb-4 border-warning">
+      <div class="card-body">
+        <h5 class="card-title">📝 继续未完成考试</h5>
+        ${items}
+      </div>
+    </div>`;
+}
+
+function resumeUnfinishedExam(examIdToResume) {
+  const ex = unfinishedExams.find(e => e.exam_id === examIdToResume);
+  if (!ex) return;
+  // 同会话同考试：内存/会话中的计时与超时设置仍有效，直接回考试页。
+  // /exam/setup 入口会清掉 activeExamId 但保留 examId 全局和其余计时状态，因此两者都要检查
+  if (examId === ex.exam_id || sessionStorage.getItem('activeExamId') === String(ex.exam_id)) {
+    examId = ex.exam_id;
+    sessionStorage.setItem('activeExamId', String(ex.exam_id));
+    router.navigate('/exam');
+    return;
+  }
+  examId = ex.exam_id;
+  examTotalCount = ex.total_count;
+  examTimerMode = ex.timer_mode;
+  // 整卷计时跨会话恢复：从恢复时刻重新累计，不把离开时长计入用时（口径与暂停一致，issue #115）
+  examStartedAt = new Date().toISOString();
+  examElapsedOffset = 0;
+  examCurrentIndex = 0;
+  examFullPreview = false;
+  sessionStorage.removeItem('examCurrentIndex');
+  sessionStorage.removeItem('examMode');
+  // ponytail: 后端未持久化单题倒计时的自定义秒数，跨会话恢复退回默认 30/45/60；
+  // 如需精确恢复，需在 ExamRecord 上存储超时配置。
+  sessionStorage.removeItem('examTimeouts');
+  sessionStorage.setItem('activeExamId', examId);
+  sessionStorage.setItem('examTimerMode', examTimerMode);
+  sessionStorage.setItem('examStartedAt', examStartedAt);
+  sessionStorage.setItem('examElapsedOffset', '0');
+  router.navigate('/exam');
+}
+
+// 放弃考试时上报的用时口径：本会话活跃考试用前端计时器口径（examElapsedSeconds，
+// 单题计时返回 null 由后端忽略）；跨会话遗留考试真实用时不可知，计 0——
+// 避免后端回退成 finished_at-started_at 的墙钟差，把离开数天全部计入用时（issue #115 口径）
+function abandonElapsedSeconds(examIdToFinish) {
+  if (sessionStorage.getItem('activeExamId') === String(examIdToFinish) || examId === examIdToFinish) {
+    return examElapsedSeconds();
+  }
+  return 0;
+}
+
+async function abandonUnfinishedExam(examIdToAbandon) {
+  if (!confirm('确定放弃这场考试吗？未答的题目将计为错误，并记入练习历史。')) return;
+  try {
+    await api.finishExam(examIdToAbandon, abandonElapsedSeconds(examIdToAbandon));
+    if (sessionStorage.getItem('activeExamId') === String(examIdToAbandon)) {
+      sessionStorage.removeItem('activeExamId');
+      sessionStorage.removeItem('examCurrentIndex');
+    }
+    if (examId === examIdToAbandon) examId = null;
+    router.resolve();
+  } catch (err) {
+    alert('放弃失败: ' + err.message);
+  }
+}
+
+// 开始新考试前的冲突处理：已有未完成考试时明确提示。
+// 返回 null 表示用户取消；返回数组表示可以继续，数组内是新考试创建成功后要放弃的旧考试
+// （用时口径在此刻定格，避免会话状态被新考试覆盖后取错值）。
+async function checkUnfinishedConflict() {
+  let unfinished;
+  try {
+    unfinished = await api.getUnfinishedExams();
+  } catch {
+    return []; // 查询失败不阻断新考试
+  }
+  if (unfinished.length === 0) return [];
+  const ok = confirm(`您还有 ${unfinished.length} 场未完成的考试。开始新考试将放弃它们，未答的题目计为错误。\n\n如需继续原考试，请点击「取消」，再从页面上的「继续未完成考试」入口进入。`);
+  if (!ok) return null;
+  return unfinished.map(ex => ({ exam_id: ex.exam_id, elapsed: abandonElapsedSeconds(ex.exam_id) }));
+}
+
+// 新考试创建成功后再结清旧考试（先建后弃：开考失败时旧考试不受影响）。
+// 单场结清失败不阻断新考试，该场仍留在未完成列表中，可稍后重试放弃。
+async function abandonExamsQuietly(toAbandon) {
+  for (const ex of toAbandon) {
+    try {
+      await api.finishExam(ex.exam_id, ex.elapsed);
+    } catch { /* 留在未完成列表，可稍后重试 */ }
+  }
+}
+
 async function startExam() {
   const selectedBanks = [...document.querySelectorAll('.bank-checkbox:checked')].map(cb => parseInt(cb.value));
   if (selectedBanks.length === 0) { alert('请至少选择一个题库'); return; }
@@ -1247,6 +1379,8 @@ async function startExam() {
   const chapterCheckboxes = document.querySelectorAll('.exam-chapter-filter');
   if (chapterCheckboxes.length > 0 && chapters.length === 0) { alert('请至少选择一个章节'); return; }
   try {
+    const toAbandon = await checkUnfinishedConflict();
+    if (toAbandon === null) return;
     const res = await api.startExam({ bank_ids: selectedBanks, mode, types, chapters: chapters.length > 0 ? chapters : null, question_count: questionCount, timer_mode: timerMode, choice_timeout: choiceTimeout, judge_fill_timeout: fillTimeout });
     examId = res.exam_id;
     examTotalCount = res.total_count;
@@ -1262,6 +1396,7 @@ async function startExam() {
     sessionStorage.setItem('examStartedAt', examStartedAt);
     sessionStorage.setItem('examElapsedOffset', '0');
     saveExamTimeouts(choiceTimeout, multiTimeout, fillTimeout);
+    await abandonExamsQuietly(toAbandon);
     router.navigate('/exam');
   } catch (err) {
     alert(err.message);
@@ -2395,6 +2530,12 @@ async function startWrongPractice() {
   btn.disabled = true;
   btn.textContent = '创建中...';
   try {
+    const toAbandon = await checkUnfinishedConflict();
+    if (toAbandon === null) {
+      btn.disabled = false;
+      btn.textContent = '开始练习';
+      return;
+    }
     const res = await api.startWrongAnswerExam({
       bank_ids: selectedBanks,
       timer_mode: 'per_question',
@@ -2413,6 +2554,7 @@ async function startWrongPractice() {
     sessionStorage.setItem('examTimerMode', examTimerMode);
     sessionStorage.setItem('examStartedAt', examStartedAt);
     sessionStorage.setItem('examElapsedOffset', '0');
+    await abandonExamsQuietly(toAbandon);
     closeWrongPracticeModal();
     router.navigate('/exam');
   } catch (err) {
