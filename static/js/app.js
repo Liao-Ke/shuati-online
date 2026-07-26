@@ -1488,13 +1488,21 @@ function resumeExam() {
   }
 }
 
+// 整卷计时模式下页面计时器口径的已用秒数（不含暂停时长），其他模式返回 null（issue #115）
+function examElapsedSeconds() {
+  if (examTimerMode !== 'elapsed') return null;
+  if (examPaused || !examStartedAt) return examElapsedOffset;
+  return examElapsedOffset + Math.max(0, Math.floor((Date.now() - new Date(examStartedAt).getTime()) / 1000));
+}
+
 async function finishExam() {
   if (!confirm('确定要提前结束吗？未答的题目将计为错误。')) return;
+  const elapsedSeconds = examElapsedSeconds();
   if (examPaused) resumeExam();
   clearInterval(examTimerInterval);
   if (examElapsedInterval) clearInterval(examElapsedInterval);
   try {
-    await api.finishExam(examId);
+    await api.finishExam(examId, elapsedSeconds);
     window.removeEventListener('scroll', trackPreviewScroll);
     sessionStorage.removeItem('activeExamId');
     sessionStorage.removeItem('examCurrentIndex');
@@ -1698,7 +1706,7 @@ async function submitInlineAnswer(examId, questionId, index, answer) {
   if (examPaused) return;
   const timeSpent = 1;
   try {
-    const res = await api.submitAnswer(examId, questionId, answer, timeSpent);
+    const res = await api.submitAnswer(examId, questionId, answer, timeSpent, examElapsedSeconds());
     examCurrentIndex = index;
     sessionStorage.setItem('examCurrentIndex', index);
     examProgress = await api.getExamProgress(examId);
@@ -1891,7 +1899,7 @@ async function submitCurrentAnswer() {
     const data = await api.getCurrentQuestion(examId, examCurrentIndex);
     if (!data.question) { router.navigate(`/result/${examId}`); return; }
     const qid = data.question.id;
-    await api.submitAnswer(examId, qid, userAnswer, timeSpent);
+    await api.submitAnswer(examId, qid, userAnswer, timeSpent, examElapsedSeconds());
     examProgress = await api.getExamProgress(examId);
 
     loadQuestionByIndex(examCurrentIndex);
