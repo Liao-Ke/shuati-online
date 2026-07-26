@@ -104,9 +104,10 @@ class ExamCurrent(BaseModel):
     total_count: int
     question: QuestionOut | None = None
     is_answered: bool = False
-    user_answer: str | None = None
+    # 多选/多空填空答案为数组，与结果页/历史详情接口口径一致（issue #111）
+    user_answer: str | list[str] | None = None
     is_correct: bool | None = None
-    correct_answer: str | None = None
+    correct_answer: str | list[str] | None = None
 
 
 class AnswerSubmit(BaseModel):
@@ -114,6 +115,13 @@ class AnswerSubmit(BaseModel):
     question_id: int
     user_answer: str | list[str] | None = None
     time_spent_seconds: int = Field(ge=0)
+    # 整卷计时模式下前端计时器口径的已用秒数（不含暂停时长），仅最后一题自动结束时生效（issue #115）
+    elapsed_seconds: int | None = Field(default=None, ge=0)
+
+
+class ExamFinish(BaseModel):
+    # 整卷计时模式下前端计时器口径的已用秒数（不含暂停时长），issue #115
+    elapsed_seconds: int | None = Field(default=None, ge=0)
 
 
 class AnswerResult(BaseModel):

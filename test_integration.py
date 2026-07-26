@@ -1865,6 +1865,229 @@ def test_76_eight_options_allowed_across_all_entrypoints(client, auth_headers):
             break
 
 
+# ── Test: 单空填空题提交数组答案返回 400 而非 500（issue #114）──
+
+
+def test_77_submit_answer_rejects_list_for_single_blank_fill(client, auth_headers):
+    """单空填空题（answer 为字符串）提交数组答案时返回 400，且不写入答题记录（issue #114）"""
+    # sequential 按 (bank_id, sort_order, id) 排序，首题即 BANK_DATA 中的单空题「中国的首都是____」
+    exam_id, qid = _start_exam_question(client, auth_headers, "fill")
+    r = client.post(f"/api/exam/{exam_id}/answer", json={
+        "exam_id": exam_id, "question_id": qid,
+        "user_answer": ["北京", "上海"], "time_spent_seconds": 1,
+    }, headers=auth_headers)
+    assert r.status_code == 400, f"应返回 400 而非 {r.status_code}: {r.text}"
+    assert "字符串" in r.text
+    _assert_exam_has_no_answers(client, auth_headers, exam_id)
+
+    # 同一场考试提交合法字符串答案仍正常判分
+    r = client.post(f"/api/exam/{exam_id}/answer", json={
+        "exam_id": exam_id, "question_id": qid,
+        "user_answer": "北京", "time_spent_seconds": 1,
+    }, headers=auth_headers)
+    assert r.status_code == 200
+    assert r.json()["is_correct"] is True
+
+
+# ── Test: 编辑时显式 null 清空章节/解析/描述（issue #112）──
+
+
+def test_78_update_question_null_clears_chapter_and_analysis(client, auth_headers):
+    """编辑题目显式传 null 时清空章节与解析，并持久化（issue #112）"""
+    _ensure_test_bank(client, auth_headers)
+    r = client.post(f"/api/question-banks/{state.bank_id}/questions", json={
+        "type": "judge", "content": "清空字段测试题", "chapter": "第一章",
+        "answer": "对", "analysis": "原解析",
+    }, headers=auth_headers)
+    assert r.status_code == 201
+    qid = r.json()["id"]
+
+    # 模拟前端 saveQForm：清空输入框后以 null 发送全部字段
+    r = client.put(f"/api/questions/{qid}", json={
+        "type": "judge", "chapter": None, "content": "清空字段测试题",
+        "options": None, "answer": "对", "analysis": None,
+    }, headers=auth_headers)
+    assert r.status_code == 200
+    assert r.json()["chapter"] is None, f"chapter 应被清空: {r.text}"
+    assert r.json()["analysis"] is None, f"analysis 应被清空: {r.text}"
+
+    # 重新读取确认已持久化
+    r = client.get(f"/api/question-banks/{state.bank_id}", headers=auth_headers)
+    q = next(x for x in r.json()["questions"] if x["id"] == qid)
+    assert q["chapter"] is None
+    assert q["analysis"] is None
+    client.delete(f"/api/questions/{qid}", headers=auth_headers)
+
+
+def test_79_update_question_omitted_fields_keep_old_values(client, auth_headers):
+    """请求体中省略 chapter/analysis 键时保留旧值，向后兼容（issue #112）"""
+    _ensure_test_bank(client, auth_headers)
+    r = client.post(f"/api/question-banks/{state.bank_id}/questions", json={
+        "type": "judge", "content": "省略字段测试题", "chapter": "第二章",
+        "answer": "错", "analysis": "解析保留",
+    }, headers=auth_headers)
+    assert r.status_code == 201
+    qid = r.json()["id"]
+
+    r = client.put(f"/api/questions/{qid}", json={"content": "仅改内容"}, headers=auth_headers)
+    assert r.status_code == 200
+    assert r.json()["chapter"] == "第二章"
+    assert r.json()["analysis"] == "解析保留"
+    client.delete(f"/api/questions/{qid}", headers=auth_headers)
+
+
+def test_80_update_bank_description_null_clears_omitted_keeps(client, auth_headers):
+    """题库描述：省略键保留旧值，显式 null 清空（issue #112）"""
+    r = client.post("/api/question-banks/import", json={
+        "title": f"清空描述-{uuid.uuid4().hex[:8]}", "description": "原始描述",
+        "questions": [{"type": "judge", "content": "占位题", "answer": "对"}],
+    }, headers=auth_headers)
+    assert r.status_code == 201
+    bank_id = r.json()["id"]
+
+    # 省略 description 键 → 保留旧值
+    r = client.put(f"/api/question-banks/{bank_id}", json={"title": "改名不动描述"}, headers=auth_headers)
+    assert r.status_code == 200
+    assert r.json()["description"] == "原始描述"
+
+    # 显式 null → 清空（模拟前端 saveBankEdit）
+    r = client.put(f"/api/question-banks/{bank_id}", json={
+        "title": "改名不动描述", "description": None,
+    }, headers=auth_headers)
+    assert r.status_code == 200
+    assert r.json()["description"] is None, f"description 应被清空: {r.text}"
+
+    r = client.get(f"/api/question-banks/{bank_id}", headers=auth_headers)
+    assert r.json()["description"] is None
+    client.delete(f"/api/question-banks/{bank_id}", headers=auth_headers)
+
+
+# ── issue #115: 整卷计时暂停时长不计入总用时 ──
+
+
+def _start_elapsed_exam(client, auth_headers):
+    r = client.post("/api/exam/start", json={
+        "bank_ids": [state.bank_id], "mode": "sequential",
+        "types": ["choice", "fill", "judge", "multiple"],
+        "choice_timeout": 30, "judge_fill_timeout": 60,
+        "timer_mode": "elapsed",
+    }, headers=auth_headers)
+    assert r.status_code == 200, r.text
+    return r.json()["exam_id"]
+
+
+def _backdate_exam_start(exam_id: int, seconds: int):
+    """把 started_at 回拨，模拟真实作答经过的墙钟时间"""
+    from database import SessionLocal
+    from models import ExamRecord, utcnow
+
+    db = SessionLocal()
+    try:
+        exam = db.query(ExamRecord).filter(ExamRecord.id == exam_id).first()
+        exam.started_at = utcnow() - timedelta(seconds=seconds)
+        db.commit()
+    finally:
+        db.close()
+
+
+def test_115a_finish_elapsed_uses_client_elapsed(client, auth_headers):
+    """整卷计时手动结束：duration 采用前端计时器口径（不含暂停），不再取墙钟差（issue #115）"""
+    exam_id = _start_elapsed_exam(client, auth_headers)
+    _backdate_exam_start(exam_id, 600)  # 墙钟已过 600s，其中含暂停时长
+    r = client.post(f"/api/exam/{exam_id}/finish", json={"elapsed_seconds": 120}, headers=auth_headers)
+    assert r.status_code == 200, r.text
+    duration = client.get(f"/api/exam/{exam_id}/result", headers=auth_headers).json()["duration_seconds"]
+    assert duration == 120, f"应采用前端上报的 120s，实际 {duration}"
+
+
+def test_115b_finish_elapsed_clamped_by_wall_clock(client, auth_headers):
+    """上报值超过墙钟差时按墙钟封顶，防止伪造超长用时（issue #115）"""
+    exam_id = _start_elapsed_exam(client, auth_headers)
+    r = client.post(f"/api/exam/{exam_id}/finish", json={"elapsed_seconds": 99999}, headers=auth_headers)
+    assert r.status_code == 200, r.text
+    duration = client.get(f"/api/exam/{exam_id}/result", headers=auth_headers).json()["duration_seconds"]
+    assert duration <= 5, f"上报值超出墙钟差应被封顶，实际 {duration}"
+
+
+def test_115c_finish_elapsed_fallback_wall_clock(client, auth_headers):
+    """不上报 elapsed_seconds（旧客户端）时回退墙钟差值，保持兼容"""
+    exam_id = _start_elapsed_exam(client, auth_headers)
+    _backdate_exam_start(exam_id, 100)
+    r = client.post(f"/api/exam/{exam_id}/finish", json={}, headers=auth_headers)
+    assert r.status_code == 200, r.text
+    duration = client.get(f"/api/exam/{exam_id}/result", headers=auth_headers).json()["duration_seconds"]
+    assert 98 <= duration <= 105, f"未上报时应为墙钟差约 100s，实际 {duration}"
+
+
+def test_115d_finish_rejects_negative_elapsed(client, auth_headers):
+    """负数 elapsed_seconds 应被 schema 校验拒绝"""
+    exam_id = _start_elapsed_exam(client, auth_headers)
+    r = client.post(f"/api/exam/{exam_id}/finish", json={"elapsed_seconds": -1}, headers=auth_headers)
+    assert r.status_code == 422, f"负数应返回 422: {r.status_code}"
+
+
+def test_115e_last_answer_uses_client_elapsed(client, auth_headers):
+    """提交最后一题自动结束路径同样采用前端口径的 elapsed_seconds（issue #115）"""
+    exam_id = _start_elapsed_exam(client, auth_headers)
+    _backdate_exam_start(exam_id, 600)
+    total = client.get(f"/api/exam/{exam_id}/current", headers=auth_headers).json()["total_count"]
+    for _ in range(total):
+        q = client.get(f"/api/exam/{exam_id}/current", headers=auth_headers).json()["question"]
+        ans = {"choice": "A", "judge": "对", "multiple": ["A"]}.get(q["type"], "x")
+        r = client.post(f"/api/exam/{exam_id}/answer", json={
+            "exam_id": exam_id, "question_id": q["id"],
+            "user_answer": ans, "time_spent_seconds": 1,
+            "elapsed_seconds": 45,
+        }, headers=auth_headers)
+        assert r.status_code == 200, r.text
+        if r.json()["is_last"]:
+            break
+    duration = client.get(f"/api/exam/{exam_id}/result", headers=auth_headers).json()["duration_seconds"]
+    assert duration == 45, f"自动结束应采用上报的 45s，实际 {duration}"
+
+
+# ── issue #111: 回看已作答题目答案返回真实数组而非 Python repr ──
+
+
+def test_111a_current_answered_multiple_returns_json_arrays(client, auth_headers):
+    """回看已作答多选题，user_answer/correct_answer 应为 JSON 数组而非 Python repr 字符串（issue #111）"""
+    r = client.post("/api/exam/start", json={
+        "bank_ids": [state.bank_id], "mode": "sequential", "types": ["multiple"],
+        "choice_timeout": 30, "judge_fill_timeout": 60,
+    }, headers=auth_headers)
+    assert r.status_code == 200, r.text
+    exam_id = r.json()["exam_id"]
+    q = client.get(f"/api/exam/{exam_id}/current", headers=auth_headers).json()["question"]
+    r = client.post(f"/api/exam/{exam_id}/answer", json={
+        "exam_id": exam_id, "question_id": q["id"],
+        "user_answer": ["A", "B"], "time_spent_seconds": 1,
+    }, headers=auth_headers)
+    assert r.status_code == 200, r.text
+    data = client.get(f"/api/exam/{exam_id}/current?index=0", headers=auth_headers).json()
+    assert data["is_answered"] is True
+    assert data["user_answer"] == ["A", "B"], f"应为 JSON 数组，实际 {data['user_answer']!r}"
+    assert data["correct_answer"] == ["A", "B", "C", "D"], f"应为 JSON 数组，实际 {data['correct_answer']!r}"
+
+
+def test_111b_current_answered_choice_stays_string(client, auth_headers):
+    """回看已作答选择题仍返回字符串答案，行为不变"""
+    r = client.post("/api/exam/start", json={
+        "bank_ids": [state.bank_id], "mode": "sequential", "types": ["choice"],
+        "choice_timeout": 30, "judge_fill_timeout": 60,
+    }, headers=auth_headers)
+    assert r.status_code == 200, r.text
+    exam_id = r.json()["exam_id"]
+    q = client.get(f"/api/exam/{exam_id}/current", headers=auth_headers).json()["question"]
+    r = client.post(f"/api/exam/{exam_id}/answer", json={
+        "exam_id": exam_id, "question_id": q["id"],
+        "user_answer": "A", "time_spent_seconds": 1,
+    }, headers=auth_headers)
+    assert r.status_code == 200, r.text
+    data = client.get(f"/api/exam/{exam_id}/current?index=0", headers=auth_headers).json()
+    assert data["user_answer"] == "A"
+    assert data["correct_answer"] == "B"
+
+
 # ── issue #82: 未作答填空题返回 blank_count 安全元数据 ──
 
 
