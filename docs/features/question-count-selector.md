@@ -23,11 +23,12 @@
 ### 子集选取（后端）
 ```python
 if data.question_count and data.question_count < len(questions):
-    random.seed(user.id + hash(str(data.bank_ids)) + data.question_count)
     selected = random.sample(questions, data.question_count)
     question_ids = [q.id for q in selected]
 ```
-种子固定保证同一个用户+题库+数量组合每次抽题结果一致。
+每次开考独立随机抽样，结果写入 `question_ids` 快照；恢复/回看均读快照，不依赖抽样可复算。
+（历史：最初用固定种子保证同组合抽题一致，#12 将 hash() 换成 crc32 修复重启不稳定；
+#144 确认固定种子导致同一用户永远抽到同一子集且对恢复功能无实际作用，已改为真随机。）
 
 ### 前端联动
 - 勾选"全部题目" → 不传 `question_count`，行为不变

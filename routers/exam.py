@@ -1,7 +1,6 @@
 import json
 import logging
 import random
-import zlib
 
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy import func
@@ -117,9 +116,9 @@ def start_exam(data: ExamStart, user: User = Depends(get_current_user), db: Sess
         raise HTTPException(status_code=400, detail="没有符合条件的题目")
 
     if data.question_count and data.question_count < len(questions):
-        # hash() 默认随机化会导致重启后抽题结果不一致，改用 crc32 确保确定性种子。
-        seed = user.id + zlib.crc32(str(data.bank_ids).encode()) + (data.question_count or 0)
-        selected = random.Random(seed).sample(questions, data.question_count)
+        # 每次开考真随机抽题（issue #144）：恢复考试依赖 question_ids 快照，
+        # 不需要种子可复算，固定种子只会让同一用户永远抽到同一批题
+        selected = random.sample(questions, data.question_count)
         question_ids = [q.id for q in selected]
     else:
         selected = questions

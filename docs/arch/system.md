@@ -179,7 +179,7 @@ else:           按 bank_id + sort_order + id 排序
 if question_ids: 过滤到选中的子集
 ```
 
-子集选取使用确定性种子 `random.seed(user.id + hash(str(bank_ids)) + question_count)`，保证同一用户+题库+题数的组合每次抽取结果一致。
+子集选取在开考时用 `random.sample` 真随机抽取（#144 去除固定种子），结果写入 `exam_records.question_ids` 快照；场内题目集合与恢复考试均读快照，不依赖抽样可复算。随机模式的题序 shuffle 仍以 `exam.id` 为种子，保证同一场考试内题序稳定。
 
 ---
 

@@ -2787,3 +2787,33 @@ def test_131b_sqlite_enforces_foreign_keys(client, auth_headers):
     # ORM 删除路径不受影响：级联先清理子记录再删父行
     assert client.delete(f"/api/question-banks/{bank_id}", headers=auth_headers).status_code == 204
     assert client.get(f"/api/question-banks/{bank_id}", headers=auth_headers).status_code == 404
+
+
+def test_144_question_sampling_varies_across_exams(client, auth_headers):
+    """抽题子集不再由固定种子决定：同一用户+题库+数量多次开考应能抽到不同子集（issue #144）。
+    20 题抽 5 题共 C(20,5)=15504 种组合，8 次独立随机抽样全部相同的概率约 1e-29，
+    断言「至少出现两种子集」在真随机下稳定通过，在固定种子下必然失败。"""
+    suffix = uuid.uuid4().hex[:8]
+    r = client.post("/api/question-banks/import", json={
+        "title": f"抽题随机性_{suffix}", "description": "",
+        "questions": [
+            {"type": "judge", "content": f"抽题随机性题目{i}", "answer": "对"}
+            for i in range(20)
+        ],
+    }, headers=auth_headers)
+    assert r.status_code == 201
+    new_bank = r.json()["id"]
+
+    subsets = set()
+    for _ in range(8):
+        r = client.post("/api/exam/start", json={
+            "bank_ids": [new_bank], "mode": "sequential", "question_count": 5,
+        }, headers=auth_headers)
+        assert r.status_code == 200, r.text
+        exam_id = r.json()["exam_id"]
+        r = client.get(f"/api/exam/{exam_id}/preview", headers=auth_headers)
+        assert r.status_code == 200
+        subsets.add(frozenset(q["id"] for q in r.json()["questions"]))
+
+    assert len(subsets) > 1, "8 次开考抽到的题目子集完全相同，抽样仍是确定性的"
+    client.delete(f"/api/question-banks/{new_bank}", headers=auth_headers)
