@@ -215,6 +215,17 @@ class ExamProgress(BaseModel):
     answers: list[dict] = []
 
 
+class UnfinishedExam(BaseModel):
+    """未完成考试摘要，供恢复入口展示（issue #44）"""
+    exam_id: int
+    bank_titles: list[str] = []
+    mode: str
+    timer_mode: str
+    total_count: int
+    answered_count: int
+    started_at: str
+
+
 class QuestionCreate(BaseModel):
     type: str
     chapter: str | None = None
