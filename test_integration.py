@@ -796,7 +796,8 @@ def test_25a_review_stats_ignore_deleted_questions(client, auth_headers):
 
 
 def test_25b_review_record_not_inherited_by_reused_id(client, auth_headers):
-    """SQLite 会复用已删除题目的主键，新题目不能继承旧题目的背题状态（issue #84）"""
+    """题目删除必须真删背题记录，新题目不得继承旧状态（issue #84）。
+    #131 根除主键复用后，本测试退化为级联删除的回归验证"""
     baseline = client.get("/api/review/stats", headers=auth_headers).json()
     suffix = uuid.uuid4().hex[:8]
     r = client.post("/api/question-banks/import", json={
@@ -813,7 +814,7 @@ def test_25b_review_record_not_inherited_by_reused_id(client, auth_headers):
     assert r.status_code == 200
     assert client.delete(f"/api/questions/{old_qid}", headers=auth_headers).status_code == 204
 
-    # 删除后新增的题目可能拿到与旧题相同的 id
+    # #131 前此处新题会复用旧题 id（继承路径）；现在 id 单调递增，真删由末尾 stats 断言兜底
     r = client.post(f"/api/question-banks/{bank_id}/questions", json={
         "type": "judge", "content": "新题，从未标记过", "answer": "错",
     }, headers=auth_headers)
@@ -2142,28 +2143,14 @@ def test_82c_non_fill_blank_count_is_none(client, auth_headers):
 # ── Test: 考试取题题库归属校验（issue #123）──
 
 
-def test_123a_preview_not_leak_reused_bank_of_other_user(client, auth_headers):
-    """题库删除后 id 被他人新题库复用，回看已完成考试不得读到他人题目（issue #123）"""
+def test_123a_preview_not_leak_foreign_bank(client, auth_headers):
+    """回看考试快照含他人题库 id 时不得读到他人题目（issue #123）。
+    原版通过「删库释放 rowid → 他人导入复用 id」纯 HTTP 构造该状态；#131 主键改
+    AUTOINCREMENT 后 id 不再复用，改为直接伪造快照（与 test_123b/c 同口径）"""
     suffix = uuid.uuid4().hex[:8]
-    # 攻击者 A：导入题库并开考后立即结束（#19 的删除保护只拦 in_progress），再删库释放 id
-    r = client.post("/api/question-banks/import", json={
-        "title": f"A自删题库_{suffix}", "description": "",
-        "questions": [{"type": "judge", "content": "A的旧题", "answer": "对"}],
-    }, headers=auth_headers)
-    assert r.status_code == 201
-    bank_id = r.json()["id"]
-    old_qid = client.get(f"/api/question-banks/{bank_id}", headers=auth_headers).json()["questions"][0]["id"]
+    attacker_id = client.get("/api/auth/me", headers=auth_headers).json()["id"]
 
-    r = client.post("/api/exam/start", json={
-        "bank_ids": [bank_id], "mode": "sequential",
-    }, headers=auth_headers)
-    assert r.status_code == 200, r.text
-    exam_id = r.json()["exam_id"]
-    assert client.post(f"/api/exam/{exam_id}/finish", headers=auth_headers).status_code == 200
-    assert client.delete(f"/api/question-banks/{bank_id}", headers=auth_headers).status_code == 204
-
-    # 受害者 B：新用户导入题库，题库 id 与题目 id 均复用 A 刚释放的 rowid
-    r = client.post("/api/auth/register", json={"username": f"victim_{suffix}", "password": "123456"})
+    r = client.post("/api/auth/register", json={"username": f"victimp_{suffix}", "password": "123456"})
     assert r.status_code == 200
     victim_headers = {"Authorization": f"Bearer {r.json()['access_token']}"}
     r = client.post("/api/question-banks/import", json={
@@ -2171,18 +2158,19 @@ def test_123a_preview_not_leak_reused_bank_of_other_user(client, auth_headers):
         "questions": [{"type": "judge", "content": f"B机密题_{suffix}", "answer": "对"}],
     }, headers=victim_headers)
     assert r.status_code == 201
-    assert r.json()["id"] == bank_id, "前提不成立：题库 id 未被复用，测试未覆盖目标场景"
-    reused_qid = client.get(f"/api/question-banks/{bank_id}", headers=victim_headers).json()["questions"][0]["id"]
-    assert reused_qid == old_qid, "前提不成立：题目 id 未被复用，测试未覆盖目标场景"
+    victim_bank = r.json()["id"]
+    victim_qid = client.get(f"/api/question-banks/{victim_bank}", headers=victim_headers).json()["questions"][0]["id"]
 
-    # A 回看考试：快照里的 id 已指向 B 的题库，归属校验后不得返回任何题目
+    exam_id = _fabricate_exam(attacker_id, victim_bank, victim_qid, "completed")
+
+    # 攻击者回看考试：快照里的 id 指向 B 的题库，归属校验后不得返回任何题目
     r = client.get(f"/api/exam/{exam_id}/preview", headers=auth_headers)
     assert r.status_code == 200
     contents = [q["content"] for q in r.json()["questions"]]
     assert f"B机密题_{suffix}" not in contents, "跨用户泄露：读到了 B 的题目内容"
     assert r.json()["total_count"] == 0
 
-    assert client.delete(f"/api/question-banks/{bank_id}", headers=victim_headers).status_code == 204
+    assert client.delete(f"/api/question-banks/{victim_bank}", headers=victim_headers).status_code == 204
 
 
 def _fabricate_exam(user_id, bank_id, question_id, status, with_wrong_answer=False):
@@ -2280,3 +2268,62 @@ def test_123c_result_and_wrong_answers_do_not_leak_foreign_question(client, auth
     assert all(q["question_id"] != victim_qid for q in wrong.json())
 
     assert client.delete(f"/api/question-banks/{victim_bank}", headers=victim_headers).status_code == 204
+
+
+# ── Test: 主键单调不复用与外键强制（issue #131）──
+
+
+def test_131a_deleted_ids_never_reused(client, auth_headers):
+    """questions/question_banks 主键 AUTOINCREMENT 后，删除最高位行的 id 不再被复用，
+    快照里的旧 id 永远指向同一行或「已删除」（issue #131 根因修复）"""
+    suffix = uuid.uuid4().hex[:8]
+    r = client.post("/api/question-banks/import", json={
+        "title": f"复用根除_{suffix}", "description": "",
+        "questions": [{"type": "judge", "content": "旧题，删除后 id 不得复用", "answer": "对"}],
+    }, headers=auth_headers)
+    assert r.status_code == 201
+    old_bank = r.json()["id"]
+    old_qid = client.get(f"/api/question-banks/{old_bank}", headers=auth_headers).json()["questions"][0]["id"]
+    assert client.delete(f"/api/question-banks/{old_bank}", headers=auth_headers).status_code == 204
+
+    r = client.post("/api/question-banks/import", json={
+        "title": f"复用根除新库_{suffix}", "description": "",
+        "questions": [{"type": "judge", "content": "新题，id 必须单调递增", "answer": "对"}],
+    }, headers=auth_headers)
+    assert r.status_code == 201
+    new_bank = r.json()["id"]
+    new_qid = client.get(f"/api/question-banks/{new_bank}", headers=auth_headers).json()["questions"][0]["id"]
+
+    assert new_bank > old_bank, f"题库 id 被复用：old={old_bank}, new={new_bank}"
+    assert new_qid > old_qid, f"题目 id 被复用：old={old_qid}, new={new_qid}"
+
+    assert client.delete(f"/api/question-banks/{new_bank}", headers=auth_headers).status_code == 204
+
+
+def test_131b_sqlite_enforces_foreign_keys(client, auth_headers):
+    """应用连接强制 PRAGMA foreign_keys=ON：绕过 ORM 的原生 SQL 删除被外键拦截，
+    不再产生悬垂引用（issue #131 纵深防御，#123 安全审查 poc3 回归）"""
+    import sqlalchemy.exc
+    from sqlalchemy import text
+
+    from database import engine
+
+    suffix = uuid.uuid4().hex[:8]
+    r = client.post("/api/question-banks/import", json={
+        "title": f"FK强制_{suffix}", "description": "",
+        "questions": [{"type": "judge", "content": "被背题记录引用的题目", "answer": "对"}],
+    }, headers=auth_headers)
+    assert r.status_code == 201
+    bank_id = r.json()["id"]
+    qid = client.get(f"/api/question-banks/{bank_id}", headers=auth_headers).json()["questions"][0]["id"]
+    r = client.post("/api/review/mark", json={"question_id": qid, "status": "known"}, headers=auth_headers)
+    assert r.status_code == 200
+
+    with engine.connect() as conn:
+        assert conn.exec_driver_sql("PRAGMA foreign_keys").scalar() == 1
+        with pytest.raises(sqlalchemy.exc.IntegrityError):
+            conn.execute(text("DELETE FROM questions WHERE id = :qid"), {"qid": qid})
+
+    # ORM 删除路径不受影响：级联先清理子记录再删父行
+    assert client.delete(f"/api/question-banks/{bank_id}", headers=auth_headers).status_code == 204
+    assert client.get(f"/api/question-banks/{bank_id}", headers=auth_headers).status_code == 404

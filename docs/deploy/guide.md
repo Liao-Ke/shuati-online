@@ -191,20 +191,15 @@ docker compose up -d
 
 ### WAL 模式（可选优化）
 
-SQLite 默认是 journal 模式，写入并发能力有限。可手动启用 WAL：
+SQLite 默认是 journal 模式，写入并发能力有限。可手动启用 WAL——`database.py` 已有一个 connect 事件监听器为每个应用连接执行 `PRAGMA foreign_keys=ON`（issue #131），WAL 参数可追加在同一监听器中：
 
 ```python
-# 在 database.py 的 engine 创建后添加
-from sqlalchemy import event
-from sqlalchemy.engine import Engine
-
-@event.listens_for(Engine, "connect")
-def set_sqlite_pragma(dbapi_connection, connection_record):
-    cursor = dbapi_connection.cursor()
-    cursor.execute("PRAGMA journal_mode=WAL")
-    cursor.execute("PRAGMA synchronous=NORMAL")
-    cursor.close()
+# database.py 的 _enforce_sqlite_foreign_keys 内追加
+cursor.execute("PRAGMA journal_mode=WAL")
+cursor.execute("PRAGMA synchronous=NORMAL")
 ```
+
+注意监听器挂在 `engine` 实例而非 `Engine` 类上：alembic 迁移自建的连接必须保持外键关闭，batch 整表重建才能安全执行。
 
 ---
 

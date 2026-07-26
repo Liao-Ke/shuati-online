@@ -32,6 +32,8 @@ jobs:
           node-version: "20"
       - run: pip install -r requirements.txt
       - run: pytest test_integration.py -v
+      # 迁移测试建临时库真跑 alembic，集成测试的 create_all 路径覆盖不到（issue #131）
+      - run: pytest test_migration.py -v
       - run: node --test tests/frontend/*.test.js
 
   docker-build:
