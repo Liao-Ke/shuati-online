@@ -1554,13 +1554,14 @@ async function loadQuestionByIndex(index) {
       </div>
     `;
 
+    // 新题渲染时无条件清空两类共享答案状态：单向重置会让旧题未提交的选择
+    // 跨题泄漏（多选残留覆盖新答案 / 选择残留被多选题自动提交）（issue #150）
+    selectedAnswer = null;
+    selectedMultiAnswers = [];
     if (q.type === 'fill') {
       document.getElementById('submit-answer-btn').disabled = false;
     } else if (q.type === 'multiple') {
-      selectedMultiAnswers = [];
       document.getElementById('submit-answer-btn').disabled = true;
-    } else {
-      selectedAnswer = null;
     }
 
     if (examTimerMode !== 'elapsed') {
@@ -2003,10 +2004,11 @@ async function submitCurrentAnswer() {
 
   const timeSpent = examTimerMode === 'elapsed' ? 0 : Math.max(1, Math.floor((Date.now() - state.questionStartTime) / 1000));
 
+  // 不在组装时清空 selectedMultiAnswers：提交失败后重试必须还能拿到同一份答案，
+  // 清理统一由提交成功后的 loadQuestionByIndex 完成（issue #150）
   let userAnswer = selectedAnswer || null;
   if (selectedMultiAnswers.length > 0) {
     userAnswer = [...selectedMultiAnswers];
-    selectedMultiAnswers = [];
   }
   // 仅在单题模式下从当前题目的输入区读取填空答案，避免整卷模式或 DOM 残留元素覆盖其他题型的选择
   const optionsArea = document.getElementById('options-area');
