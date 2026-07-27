@@ -22,7 +22,10 @@ def utcnow() -> datetime:
 class User(Base):
     __tablename__ = "users"
 
-    id = Column(Integer, primary_key=True, index=True)
+    # 各表主键不再单独建索引：SQLite 的 INTEGER PRIMARY KEY 即 rowid 别名，
+    # 二级索引永远不会被查询计划选中，纯属写放大；索引建在参与 join/filter
+    # 的外键列上（issue #137，迁移 a1f7c2d3e4b5）
+    id = Column(Integer, primary_key=True)
     username = Column(String(50), unique=True, nullable=False, index=True)
     password_hash = Column(String(128), nullable=False)
     created_at = Column(DateTime, default=utcnow)
@@ -37,8 +40,8 @@ class QuestionBank(Base):
     # 考试快照/答题记录里的旧 id 会重新指向他人新行——#84/#123/#125 的共同根因（issue #131）
     __table_args__ = {"sqlite_autoincrement": True}
 
-    id = Column(Integer, primary_key=True, index=True)
-    user_id = Column(Integer, ForeignKey("users.id"), nullable=False)
+    id = Column(Integer, primary_key=True)
+    user_id = Column(Integer, ForeignKey("users.id"), nullable=False, index=True)
     title = Column(String(200), nullable=False)
     description = Column(Text, nullable=True)
     created_at = Column(DateTime, default=utcnow)
@@ -53,8 +56,8 @@ class Question(Base):
     # 同 QuestionBank：主键单调不复用（issue #131）
     __table_args__ = {"sqlite_autoincrement": True}
 
-    id = Column(Integer, primary_key=True, index=True)
-    bank_id = Column(Integer, ForeignKey("question_banks.id"), nullable=False)
+    id = Column(Integer, primary_key=True)
+    bank_id = Column(Integer, ForeignKey("question_banks.id"), nullable=False, index=True)
     type = Column(String(10), nullable=False)
     chapter = Column(String(200), nullable=True)
     content = Column(Text, nullable=False)
@@ -76,8 +79,8 @@ class Question(Base):
 class ExamRecord(Base):
     __tablename__ = "exam_records"
 
-    id = Column(Integer, primary_key=True, index=True)
-    user_id = Column(Integer, ForeignKey("users.id"), nullable=False)
+    id = Column(Integer, primary_key=True)
+    user_id = Column(Integer, ForeignKey("users.id"), nullable=False, index=True)
     bank_ids = Column(Text, nullable=False)
     mode = Column(String(10), nullable=False)
     question_count = Column(Integer, default=0)
@@ -97,9 +100,9 @@ class ExamRecord(Base):
 class AnswerRecord(Base):
     __tablename__ = "answer_records"
 
-    id = Column(Integer, primary_key=True, index=True)
-    exam_id = Column(Integer, ForeignKey("exam_records.id"), nullable=False)
-    question_id = Column(Integer, ForeignKey("questions.id"), nullable=True)
+    id = Column(Integer, primary_key=True)
+    exam_id = Column(Integer, ForeignKey("exam_records.id"), nullable=False, index=True)
+    question_id = Column(Integer, ForeignKey("questions.id"), nullable=True, index=True)
     # 作答时的题目快照 JSON（type/chapter/content/options/correct_answer/analysis），
     # 题目或题库删除后历史详情回退此快照展示（issue #81）
     question_snapshot = Column(Text, nullable=True)
@@ -115,9 +118,9 @@ class AnswerRecord(Base):
 class ReviewRecord(Base):
     __tablename__ = "review_records"
 
-    id = Column(Integer, primary_key=True, index=True)
+    id = Column(Integer, primary_key=True)
     user_id = Column(Integer, ForeignKey("users.id"), nullable=False)
-    question_id = Column(Integer, ForeignKey("questions.id"), nullable=False)
+    question_id = Column(Integer, ForeignKey("questions.id"), nullable=False, index=True)
     status = Column(String(20), default="reviewing")
     reviewed_at = Column(DateTime, default=utcnow)
     review_count = Column(Integer, default=1)
