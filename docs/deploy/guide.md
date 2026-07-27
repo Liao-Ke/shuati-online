@@ -88,7 +88,17 @@ source venv/bin/activate
 pip install -r requirements.txt
 ```
 
-### 2. 启动
+### 2. 初始化/更新数据库 schema
+
+```bash
+alembic upgrade head
+```
+
+首次部署与每次拉新代码后都应执行（与 §升级 一致；Docker 路径由入口自动执行）。
+漏跑时应用仍能启动，但启动日志会出现 `schema 版本落后` 的 ERROR 告警（issue #136），
+未迁移的库上安全修复不生效。
+
+### 3. 启动
 
 ```bash
 uvicorn main:app --reload --host 0.0.0.0 --port 8000
@@ -98,7 +108,7 @@ uvicorn main:app --reload --host 0.0.0.0 --port 8000
 - `--host 0.0.0.0` 允许局域网访问
 - 访问 `http://localhost:8000`
 
-### 3. 后台运行（生产）
+### 4. 后台运行（生产）
 
 ```bash
 nohup uvicorn main:app --host 0.0.0.0 --port 8000 > app.log 2>&1 &
