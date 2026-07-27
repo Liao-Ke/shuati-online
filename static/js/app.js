@@ -76,6 +76,15 @@ let examElapsedInterval = null;
 let examElapsedOffset = 0;
 let unfinishedExams = [];
 
+// 离开考试页即停掉单题倒计时：后台归零会以 null 答案静默提交当前题、
+// 甚至用新 examId + 旧题号交叉提交到新考试（issue #151 入口二）
+window.addEventListener('hashchange', () => {
+  if (location.hash.replace(/^#/, '') !== '/exam' && examTimerInterval) {
+    clearInterval(examTimerInterval);
+    examTimerInterval = null;
+  }
+});
+
 async function checkAuth() {
   if (!api.token) return false;
   try {
@@ -1580,6 +1589,9 @@ function navigateExam(delta) {
 
 function pauseExam() {
   if (examPaused) return;
+  // 先记录暂停时是否真有进行中的倒计时：回看已作答题目/整卷模式下倒计时已清，
+  // 恢复时不得从残留的 DOM 文本凭空重启（issue #151 入口一）
+  const hadCountdown = examTimerInterval !== null;
   clearInterval(examTimerInterval);
   examTimerInterval = null;
   examPaused = true;
@@ -1594,7 +1606,7 @@ function pauseExam() {
     }
   } else {
     const timerEl = document.getElementById('exam-timer');
-    examPauseRemaining = parseTime(timerEl.textContent);
+    examPauseRemaining = hadCountdown ? parseTime(timerEl.textContent) : null;
   }
   document.getElementById('exam-pause-overlay').classList.remove('d-none');
 }
@@ -1607,7 +1619,8 @@ function resumeExam() {
     examStartedAt = new Date().toISOString();
     sessionStorage.setItem('examStartedAt', examStartedAt);
     startElapsedTimer();
-  } else {
+  } else if (examPauseRemaining !== null) {
+    // null 表示暂停时没有进行中的倒计时（回看已作答题/整卷模式），不重启（issue #151 入口一）
     startTimer(examPauseRemaining);
   }
 }
