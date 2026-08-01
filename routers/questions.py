@@ -5,7 +5,7 @@ from sqlalchemy import func
 from sqlalchemy.orm import Session
 
 from auth import get_current_user
-from database import get_db
+from database import get_db, get_write_db
 from models import ExamRecord, Question, QuestionBank, User, utcnow
 from schemas import QuestionCreate, QuestionOut, QuestionUpdate
 from utils import parse_answer, parse_json_field
@@ -163,7 +163,7 @@ def update_question(
 def delete_question(
     question_id: int,
     user: User = Depends(get_current_user),
-    db: Session = Depends(get_db),
+    db: Session = Depends(get_write_db),
 ):
     question = db.query(Question).join(QuestionBank).filter(
         Question.id == question_id,

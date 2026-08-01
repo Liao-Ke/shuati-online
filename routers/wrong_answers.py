@@ -5,7 +5,7 @@ from sqlalchemy import desc, func
 from sqlalchemy.orm import Session, joinedload
 
 from auth import get_current_user
-from database import get_db
+from database import get_db, get_write_db
 from models import AnswerRecord, ExamRecord, Question, QuestionBank, User
 from schemas import WrongAnswerStartRequest
 from utils import parse_answer, parse_json_field
@@ -116,7 +116,7 @@ def list_wrong(user: User = Depends(get_current_user), db: Session = Depends(get
 def start_wrong_answer_practice(
     data: WrongAnswerStartRequest,
     user: User = Depends(get_current_user),
-    db: Session = Depends(get_db),
+    db: Session = Depends(get_write_db),
 ):
     """从错题本中筛选错题，创建一场错题练习。"""
     wrong_ids = _get_wrong_question_ids(user, db)

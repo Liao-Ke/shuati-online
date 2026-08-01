@@ -7,7 +7,7 @@ from sqlalchemy import func
 from sqlalchemy.orm import Session, selectinload
 
 from auth import get_current_user
-from database import get_db
+from database import get_db, get_write_db
 from models import AnswerRecord, ExamRecord, Question, QuestionBank, User, utcnow
 from schemas import (
     AnswerResult,
@@ -97,7 +97,7 @@ def _load_exam_questions(exam: ExamRecord, db: Session) -> tuple[list[Question],
 
 
 @router.post("/start")
-def start_exam(data: ExamStart, user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+def start_exam(data: ExamStart, user: User = Depends(get_current_user), db: Session = Depends(get_write_db)):
     banks = db.query(QuestionBank).filter(
         QuestionBank.id.in_(data.bank_ids),
         QuestionBank.user_id == user.id,
