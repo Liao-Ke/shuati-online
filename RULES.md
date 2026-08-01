@@ -44,7 +44,7 @@
 ```
 刷题在线/
 ├── main.py                 # FastAPI 入口 + 路由挂载
-├── database.py             # 引擎 + Session + get_db
+├── database.py             # 引擎 + Session + get_db / get_write_db（写事务 BEGIN IMMEDIATE，issue #132）
 ├── models.py               # ORM 模型（6 张表）
 ├── schemas.py              # Pydantic 请求/响应模型
 ├── auth.py                 # JWT + bcrypt + get_current_user

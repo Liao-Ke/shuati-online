@@ -26,7 +26,7 @@ pytest test_integration.py -v
 
 ```
 main.py                # FastAPI 入口，挂载路由和静态文件
-database.py            # SQLAlchemy engine + SessionLocal + get_db
+database.py            # SQLAlchemy engine + SessionLocal + get_db / get_write_db（写事务 BEGIN IMMEDIATE，issue #132）
 models.py              # User, QuestionBank, Question, ExamRecord, AnswerRecord, ReviewRecord
 schemas.py             # Pydantic 请求/响应模型
 auth.py                # JWT 签发/验证，get_current_user 依赖
