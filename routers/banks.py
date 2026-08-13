@@ -8,7 +8,7 @@ from sqlalchemy import func
 from sqlalchemy.orm import Session
 
 from auth import get_current_user
-from database import get_db
+from database import get_db, get_write_db
 from models import ExamRecord, Question, QuestionBank, User
 from schemas import BankDetail, BankImport, BankOut, BankUpdate, BatchImportResponse, ImportResult, QuestionOut
 from utils import parse_answer, parse_json_list
@@ -193,7 +193,7 @@ def import_banks_multiple(
 
 
 @router.delete("/{bank_id}", status_code=204)
-def delete_bank(bank_id: int, user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+def delete_bank(bank_id: int, user: User = Depends(get_current_user), db: Session = Depends(get_write_db)):
     bank = db.query(QuestionBank).filter(
         QuestionBank.id == bank_id, QuestionBank.user_id == user.id
     ).first()
