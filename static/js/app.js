@@ -475,6 +475,13 @@ router.add('/exam', async () => {
     const saved = sessionStorage.getItem('activeExamId');
     if (saved) { examId = parseInt(saved); } else { router.navigate('/exam/setup'); return; }
   }
+  // 损坏的 activeExamId（parseInt 得 NaN）会请求 /api/exam/NaN → 422，先行回退（issue #154）
+  if (Number.isNaN(examId)) {
+    examId = null;
+    sessionStorage.removeItem('activeExamId');
+    router.navigate('/exam/setup');
+    return;
+  }
   render(`
     <div class="exam-layout">
       <div class="exam-main">
@@ -529,39 +536,53 @@ router.add('/exam', async () => {
   if (savedStarted) examStartedAt = savedStarted;
   examElapsedOffset = parseInt(sessionStorage.getItem('examElapsedOffset')) || 0;
   if (examTimerMode === 'elapsed') startElapsedTimer();
-  examProgress = await api.getExamProgress(examId);
-  // 刷新恢复时同步题目总数，否则 navigateExam 的边界判断恒 return（issue #110）
-  examTotalCount = examProgress.total_count;
-  if (examCurrentIndex >= examProgress.total_count) examCurrentIndex = 0;
-  // 跨会话恢复没有 examCurrentIndex 时，定位到第一道未答题（issue #44）
-  if (savedIdx === null) {
-    const answeredIdx = new Set(examProgress.answers.map(a => a.index));
-    for (let i = 0; i < examProgress.total_count; i++) {
-      if (!answeredIdx.has(i)) { examCurrentIndex = i; break; }
+  try {
+    examProgress = await api.getExamProgress(examId);
+    // 刷新恢复时同步题目总数，否则 navigateExam 的边界判断恒 return（issue #110）
+    examTotalCount = examProgress.total_count;
+    if (examCurrentIndex >= examProgress.total_count) examCurrentIndex = 0;
+    // 跨会话恢复没有 examCurrentIndex 时，定位到第一道未答题（issue #44）
+    if (savedIdx === null) {
+      const answeredIdx = new Set(examProgress.answers.map(a => a.index));
+      for (let i = 0; i < examProgress.total_count; i++) {
+        if (!answeredIdx.has(i)) { examCurrentIndex = i; break; }
+      }
     }
-  }
-  renderQuestionGrid();
-  if (examFullPreview) {
-    document.getElementById('mode-toggle-btn').textContent = '📖 单题模式';
-    document.getElementById('prev-btn').style.display = 'none';
-    document.getElementById('next-btn').style.display = 'none';
-    document.getElementById('exam-nav-hint').style.display = 'none';
-    if (examTimerMode === 'per_question') document.getElementById('exam-timer').style.display = 'none';
-    document.querySelector('.exam-progress').style.display = 'none';
-    document.getElementById('exam-progress-text').textContent = '整卷模式';
-    document.querySelector('.exam-layout')?.classList.add('exam-layout-preview');
-    await renderFullPreview();
-    window.addEventListener('scroll', trackPreviewScroll, { passive: true });
-    const scrollIdx = Math.min(examCurrentIndex, examTotalCount - 1);
-    const scrollEl = document.querySelector(`.preview-card[data-index="${scrollIdx}"]`);
-    if (scrollEl) {
-      const top = scrollEl.getBoundingClientRect().top + window.scrollY - 80;
-      setTimeout(() => window.scrollTo({ top, behavior: 'smooth' }), 50);
+    renderQuestionGrid();
+    if (examFullPreview) {
+      document.getElementById('mode-toggle-btn').textContent = '📖 单题模式';
+      document.getElementById('prev-btn').style.display = 'none';
+      document.getElementById('next-btn').style.display = 'none';
+      document.getElementById('exam-nav-hint').style.display = 'none';
+      if (examTimerMode === 'per_question') document.getElementById('exam-timer').style.display = 'none';
+      document.querySelector('.exam-progress').style.display = 'none';
+      document.getElementById('exam-progress-text').textContent = '整卷模式';
+      document.querySelector('.exam-layout')?.classList.add('exam-layout-preview');
+      await renderFullPreview();
+      window.addEventListener('scroll', trackPreviewScroll, { passive: true });
+      const scrollIdx = Math.min(examCurrentIndex, examTotalCount - 1);
+      const scrollEl = document.querySelector(`.preview-card[data-index="${scrollIdx}"]`);
+      if (scrollEl) {
+        const top = scrollEl.getBoundingClientRect().top + window.scrollY - 80;
+        setTimeout(() => window.scrollTo({ top, behavior: 'smooth' }), 50);
+      }
+    } else {
+      loadQuestionByIndex(examCurrentIndex);
     }
-  } else {
-    loadQuestionByIndex(examCurrentIndex);
+    document.addEventListener('keydown', examKeyHandler);
+  } catch (err) {
+    // 与其他路由一致的失败口径，不再留在永久骨架屏（issue #154）。
+    // 考试已不存在/参数非法时清掉快照，避免刷新后反复撞同一错误
+    if (examElapsedInterval) { clearInterval(examElapsedInterval); examElapsedInterval = null; }
+    if (err.status === 404 || err.status === 422) {
+      examId = null;
+      sessionStorage.removeItem('activeExamId');
+    }
+    render(`
+      <div class="alert alert-danger">加载失败${err.status ? `(${err.status})` : ''}</div>
+      <a class="btn btn-outline-primary" href="#/exam/setup">返回答题设置</a>
+    `);
   }
-  document.addEventListener('keydown', examKeyHandler);
 });
 
 function examKeyHandler(e) {
