@@ -4,13 +4,14 @@ from urllib.parse import quote
 
 from fastapi import APIRouter, Depends, HTTPException
 from fastapi.responses import Response
-from sqlalchemy.orm import Session, selectinload
+from sqlalchemy import func
+from sqlalchemy.orm import Session
 
 from auth import get_current_user
 from database import get_db
 from models import ExamRecord, Question, QuestionBank, User
 from schemas import BankDetail, BankImport, BankOut, BankUpdate, BatchImportResponse, ImportResult, QuestionOut
-from utils import parse_answer, parse_json_field
+from utils import parse_answer, parse_json_list
 
 logger = logging.getLogger("shuati")
 
@@ -48,7 +49,10 @@ def validate_bank_import(data: BankImport) -> list[str]:
                     errors.append(f"{prefix}(选择题): 答案 '{q.answer}' 不属于现有选项 {valid_labels}")
         elif q.type == "fill":
             if isinstance(q.answer, list):
-                if any(not a or not a.strip() for a in q.answer):
+                # 空数组会生成 blank_count=0、空提交判对的畸形题（issue #146）
+                if not q.answer:
+                    errors.append(f"{prefix}(填空题): 答案数组不能为空")
+                elif any(not a or not a.strip() for a in q.answer):
                     errors.append(f"{prefix}(填空题): 答案数组不能包含空值")
             elif not q.answer or not isinstance(q.answer, str) or not q.answer.strip():
                 errors.append(f"{prefix}(填空题): 答案不能为空")
@@ -76,20 +80,23 @@ def validate_bank_import(data: BankImport) -> list[str]:
 
 @router.get("", response_model=list[BankOut])
 def list_banks(user: User = Depends(get_current_user), db: Session = Depends(get_db)):
-    banks = (
-        db.query(QuestionBank)
-        .options(selectinload(QuestionBank.questions))
+    # 聚合计数代替 selectinload 整行加载：本接口只需要每库题目数，
+    # 不把题目正文/选项/答案物化进内存（issue #149，同 dashboard 的统计口径）
+    rows = (
+        db.query(QuestionBank, func.count(Question.id))
+        .outerjoin(Question, Question.bank_id == QuestionBank.id)
         .filter(QuestionBank.user_id == user.id)
+        .group_by(QuestionBank.id)
         .order_by(QuestionBank.updated_at.desc())
         .all()
     )
     result = []
-    for bank in banks:
+    for bank, question_count in rows:
         result.append(BankOut(
             id=bank.id,
             title=bank.title,
             description=bank.description,
-            question_count=len(bank.questions),
+            question_count=question_count,
             created_at=bank.created_at.isoformat(),
             updated_at=bank.updated_at.isoformat(),
         ))
@@ -197,7 +204,8 @@ def delete_bank(bank_id: int, user: User = Depends(get_current_user), db: Sessio
         ExamRecord.user_id == user.id, ExamRecord.status == "in_progress",
     ).all()
     for exam in in_progress:
-        if bank_id in (parse_json_field(exam.bank_ids) or []):
+        # 损坏快照按空列表处理，勿让 int in str 抛 500（issue #172）
+        if bank_id in parse_json_list(exam.bank_ids):
             raise HTTPException(status_code=409, detail="该题库被进行中的考试引用，请先完成或放弃考试")
     logger.info(f"用户 {user.id} 删除题库：{bank.title}")
     db.delete(bank)
