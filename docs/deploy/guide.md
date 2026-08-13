@@ -114,6 +114,8 @@ nohup uvicorn main:app --host 0.0.0.0 --port 8000 > app.log 2>&1 &
 |---------|--------|------|
 | `DATABASE_URL` | `sqlite:///./exam.db` | 数据库连接。Docker 下应为 `sqlite:///./data/exam.db` |
 | `SECRET_KEY` | **无默认值（生产环境必须设置）** | JWT 签名密钥。开发环境未设置时自动生成并持久化到 `.secret_key` 文件，重启后复用；生产环境通过 `docker-compose.yml` 或环境变量注入 |
+| `CORS_ORIGINS` | `*` | 允许的跨域来源，逗号分隔（如 `https://exam.example.com`）。默认 `*` 全放行；按 CORS 规范，通配时自动关闭 credentials，设为具体域名列表才开启。**生产环境建议收紧为实际前端域名** |
+| `ALLOWED_HOSTS` | `*` | TrustedHostMiddleware 放行的 Host 白名单，逗号分隔（如 `exam.example.com,www.exam.example.com`）。默认 `*` 全放行。**生产环境建议设为实际域名，防 Host 头攻击** |
 
 ### 生产环境必须设置
 

@@ -20,7 +20,7 @@ from schemas import (
     QuestionOut,
     UnfinishedExam,
 )
-from utils import parse_answer, parse_json_field
+from utils import parse_answer, parse_json_field, parse_json_list
 
 logger = logging.getLogger("shuati")
 
@@ -59,10 +59,8 @@ def _load_all_exam_questions(exam: ExamRecord, db: Session) -> tuple[list[Questi
         # bank_id 过滤保持旧实现语义（题目必须仍在本场考试的题库范围内）；
         # join 复核题库归属：SQLite 主键会被复用（issue #84），快照里的题库/题目 id
         # 可能已指向他人重建的数据，不复核会跨用户泄露题目（issue #123）
-        selected_ids = parse_json_field(exam.question_ids)
-        if not isinstance(selected_ids, list):
-            # 快照损坏（无法解析为列表）时保持旧实现的降级口径：按空集过滤返回空考试，而非 500
-            selected_ids = []
+        # 快照损坏（无法解析为列表）时保持旧实现的降级口径：按空集过滤返回空考试，而非 500
+        selected_ids = parse_json_list(exam.question_ids)
         all_questions = db.query(Question).join(QuestionBank).filter(
             Question.id.in_(selected_ids), Question.bank_id.in_(bank_ids),
             QuestionBank.user_id == exam.user_id,
@@ -272,7 +270,8 @@ def submit_answer(
         raise HTTPException(status_code=400, detail="考试已结束，无法提交答案")
 
     if exam.question_ids:
-        valid_ids = set(parse_json_field(exam.question_ids))
+        # 损坏快照得空集 → 任何提交 400，与读路径的空考试降级口径一致（issue #172）
+        valid_ids = set(parse_json_list(exam.question_ids))
         if data.question_id not in valid_ids:
             raise HTTPException(status_code=400, detail="该题目不属于本次考试")
 

@@ -8,7 +8,7 @@ from auth import get_current_user
 from database import get_db, get_write_db
 from models import ExamRecord, Question, QuestionBank, User, utcnow
 from schemas import QuestionCreate, QuestionOut, QuestionUpdate
-from utils import parse_answer, parse_json_field
+from utils import parse_answer, parse_json_list
 
 router = APIRouter(prefix="/api", tags=["题目"])
 
@@ -38,7 +38,10 @@ def _validate_question(type_, content, options, answer):
                 errors.append(f"选择题答案 '{answer}' 不属于现有选项 {valid_labels}")
     elif type_ == "fill":
         if isinstance(answer, list):
-            if any(not a or not a.strip() for a in answer):
+            # 空数组会生成 blank_count=0、空提交判对的畸形题（issue #146）
+            if not answer:
+                errors.append("填空题答案数组不能为空")
+            elif any(not a or not a.strip() for a in answer):
                 errors.append("填空题答案数组不能包含空值")
         elif not answer or not isinstance(answer, str) or not answer.strip():
             errors.append("填空题答案不能为空")
@@ -124,7 +127,8 @@ def update_question(
         ExamRecord.user_id == user.id, ExamRecord.status == "in_progress",
     ).all()
     for exam in in_progress:
-        if question_id in (parse_json_field(exam.question_ids) or []):
+        # 损坏快照按空列表处理，勿让 int in str 抛 500（issue #172）
+        if question_id in parse_json_list(exam.question_ids):
             raise HTTPException(status_code=409, detail="该题目被进行中的考试引用，请先完成或放弃考试")
 
     new_type = data.type if data.type is not None else question.type
@@ -176,7 +180,8 @@ def delete_question(
         ExamRecord.user_id == user.id, ExamRecord.status == "in_progress",
     ).all()
     for exam in in_progress:
-        if question_id in (parse_json_field(exam.question_ids) or []):
+        # 损坏快照按空列表处理，勿让 int in str 抛 500（issue #172）
+        if question_id in parse_json_list(exam.question_ids):
             raise HTTPException(status_code=409, detail="该题目被进行中的考试引用，请先完成或放弃考试")
     question.question_bank.updated_at = utcnow()
     db.delete(question)
