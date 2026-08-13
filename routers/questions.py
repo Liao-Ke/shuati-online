@@ -38,7 +38,10 @@ def _validate_question(type_, content, options, answer):
                 errors.append(f"选择题答案 '{answer}' 不属于现有选项 {valid_labels}")
     elif type_ == "fill":
         if isinstance(answer, list):
-            if any(not a or not a.strip() for a in answer):
+            # 空数组会生成 blank_count=0、空提交判对的畸形题（issue #146）
+            if not answer:
+                errors.append("填空题答案数组不能为空")
+            elif any(not a or not a.strip() for a in answer):
                 errors.append("填空题答案数组不能包含空值")
         elif not answer or not isinstance(answer, str) or not answer.strip():
             errors.append("填空题答案不能为空")
