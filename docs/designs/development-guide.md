@@ -314,5 +314,5 @@ db.commit()
 | 数据库并发 | SQLite 默认不支持并发写。如果服务在多人场景下出现 `database is locked` 错误，可启用 WAL 模式 |
 | 测试隔离 | 集成测试使用随机用户名，但数据库是同一个 `exam.db`。业务数据隔离开销低，但不要依赖测试间的数据清理 |
 | 静态文件缓存 | 修改 CSS/JS 后浏览器可能缓存旧版本。开发时使用 `--reload` 并配合浏览器硬刷新（Ctrl+F5） |
-| 依赖安装 | 如果某些库安装失败（如 `bcrypt` 需要 C 扩展），可尝试：`pip install bcrypt==4.1.3 --no-binary bcrypt` |
+| 依赖安装 | 如果某些库安装失败（如 `bcrypt` 需要 C 扩展），可尝试：`pip install bcrypt==4.0.1 --no-binary bcrypt` |
 | Python 路径 | 如果使用项目中的 `sys.path.insert(0, '.')`（测试文件），确保工作目录是项目根目录 |
