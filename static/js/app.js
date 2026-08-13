@@ -1416,6 +1416,12 @@ async function startExam() {
     const res = await api.startExam({ bank_ids: selectedBanks, mode, types, chapters: chapters.length > 0 ? chapters : null, question_count: questionCount, timer_mode: timerMode, choice_timeout: choiceTimeout, judge_fill_timeout: fillTimeout });
     examId = res.exam_id;
     examTotalCount = res.total_count;
+    // 数量滑杆上限只按题库总题数计算，不感知题型/章节筛选；筛选后候选不足时
+    // 后端静默取全部候选——实际题数与设定不符必须明确提示（issue #161）。
+    // ponytail: 上限随筛选实时联动需要按题型/章节的计数数据（新增接口或全量拉题），提示是当前口径下的最小闭环。
+    if (questionCount && res.total_count < questionCount) {
+      alert(`筛选后符合条件的题目只有 ${res.total_count} 道，少于设定的 ${questionCount} 道，将按实际题数作答。`);
+    }
     examTimerMode = res.timer_mode;
     examStartedAt = res.started_at.endsWith('Z') ? res.started_at : res.started_at + 'Z';
     examElapsedOffset = 0;
