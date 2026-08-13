@@ -4,7 +4,8 @@ from urllib.parse import quote
 
 from fastapi import APIRouter, Depends, HTTPException
 from fastapi.responses import Response
-from sqlalchemy.orm import Session, selectinload
+from sqlalchemy import func
+from sqlalchemy.orm import Session
 
 from auth import get_current_user
 from database import get_db
@@ -79,20 +80,23 @@ def validate_bank_import(data: BankImport) -> list[str]:
 
 @router.get("", response_model=list[BankOut])
 def list_banks(user: User = Depends(get_current_user), db: Session = Depends(get_db)):
-    banks = (
-        db.query(QuestionBank)
-        .options(selectinload(QuestionBank.questions))
+    # 聚合计数代替 selectinload 整行加载：本接口只需要每库题目数，
+    # 不把题目正文/选项/答案物化进内存（issue #149，同 dashboard 的统计口径）
+    rows = (
+        db.query(QuestionBank, func.count(Question.id))
+        .outerjoin(Question, Question.bank_id == QuestionBank.id)
         .filter(QuestionBank.user_id == user.id)
+        .group_by(QuestionBank.id)
         .order_by(QuestionBank.updated_at.desc())
         .all()
     )
     result = []
-    for bank in banks:
+    for bank, question_count in rows:
         result.append(BankOut(
             id=bank.id,
             title=bank.title,
             description=bank.description,
-            question_count=len(bank.questions),
+            question_count=question_count,
             created_at=bank.created_at.isoformat(),
             updated_at=bank.updated_at.isoformat(),
         ))
