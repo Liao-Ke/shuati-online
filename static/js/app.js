@@ -94,6 +94,8 @@ async function checkAuth() {
 }
 
 router.add('/login', async () => {
+  // 已登录用户（含根路径空 hash 回退到 /login 的场景）直接进仪表盘，不再渲染登录表单（issue #160）
+  if (state.user) { router.navigate('/dashboard'); return; }
   render(`
     <div class="auth-page">
       <div class="auth-card">
@@ -140,6 +142,7 @@ router.add('/login', async () => {
 });
 
 router.add('/register', () => {
+  if (state.user) { router.navigate('/dashboard'); return; }
   render(`
     <div class="auth-page">
       <div class="auth-card">
