@@ -254,3 +254,32 @@ def test_137_fk_indexes_added_redundant_pk_indexes_dropped(tmp_path):
     assert not (FK_INDEXES_137 & names)
     assert names >= REDUNDANT_PK_INDEXES_137
     db.close()
+def test_136_create_all_fresh_db_stamped_and_upgradable(tmp_path):
+    """create_all 建出的全新库自动 stamp 到 head：之后 alembic upgrade head
+    不再撞已存在的表（issue #136 坑 a 的根除验证）"""
+    path = str(tmp_path / "create_all.db")
+    subprocess.run(
+        [sys.executable, "-c", "import main"],
+        cwd=PROJECT_ROOT,
+        env={**os.environ, "DATABASE_URL": f"sqlite:///{path}"},
+        capture_output=True, text=True, check=True,
+    )
+    db = sqlite3.connect(path)
+    version = db.execute("SELECT version_num FROM alembic_version").fetchone()[0]
+    assert version, "create_all 建的新库应带 alembic 版本号"
+    db.close()
+    # 坑 a 的原始症状是 upgrade 撞表崩溃；stamp 后应干净通过（no-op 或后续增量）
+    _alembic(path, "upgrade", "head")
+
+
+def test_136_outdated_db_logs_explicit_error(db_path):
+    """存量库版本落后时启动日志必须显式告警，不允许静默沿用旧 schema（issue #136 坑 b）"""
+    r = subprocess.run(
+        [sys.executable, "-c", "import main"],
+        cwd=PROJECT_ROOT,
+        env={**os.environ, "DATABASE_URL": f"sqlite:///{db_path}"},
+        capture_output=True, text=True, check=True,
+    )
+    out = r.stdout + r.stderr
+    assert "schema 版本落后" in out, f"未见告警，输出：{out[-500:]}"
+    assert "alembic upgrade head" in out
