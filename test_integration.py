@@ -2819,6 +2819,52 @@ def test_144_question_sampling_varies_across_exams(client, auth_headers):
     client.delete(f"/api/question-banks/{new_bank}", headers=auth_headers)
 
 
+def test_172_corrupt_snapshot_does_not_break_question_management(client):
+    """损坏的 question_ids/bank_ids 快照不再阻断题目/题库管理（issue #172）：
+    此前 #90/#19 的进行中考试检查对 parse_json_field 返回的原始字符串做
+    `int in str` 抛 TypeError → 500，用户名下只要有一条损坏快照的进行中考试，
+    就无法编辑/删除任何题目、无法删除任何题库；提交答案则被字符集合误判 400。
+    修复后损坏快照按空列表降级（与 #43 读路径口径一致）。"""
+    from database import SessionLocal
+    from models import ExamRecord
+
+    headers = _register_isolated_user(client, "u172")
+    bank = _import_bank(client, headers, title=f"快照损坏宿主-{uuid.uuid4().hex[:8]}")
+    r = client.post("/api/exam/start", json={
+        "bank_ids": [bank], "mode": "sequential",
+    }, headers=headers)
+    assert r.status_code == 200, r.text
+    exam_id = r.json()["exam_id"]
+
+    db = SessionLocal()
+    try:
+        # 模拟截断的 JSON：parse_json_field 解析失败会原样返回字符串
+        db.query(ExamRecord).filter(ExamRecord.id == exam_id).update(
+            {"question_ids": "[1, 2", "bank_ids": "[3, 4"})
+        db.commit()
+    finally:
+        db.close()
+
+    # 编辑/删除题目：#90 检查遍历该用户全部进行中考试，损坏快照此前必 500
+    r = client.post(f"/api/question-banks/{bank}/questions", json={
+        "type": "judge", "content": "受害题", "answer": "对",
+    }, headers=headers)
+    assert r.status_code == 201
+    qid = r.json()["id"]
+    r = client.put(f"/api/questions/{qid}", json={"content": "改后的题干"}, headers=headers)
+    assert r.status_code == 200, f"损坏快照不应阻断编辑题目: {r.text}"
+    assert client.delete(f"/api/questions/{qid}", headers=headers).status_code == 204
+
+    # 对损坏考试提交答案：明确 400 而非 TypeError
+    qid2 = client.get(f"/api/question-banks/{bank}", headers=headers).json()["questions"][0]["id"]
+    r = client.post(f"/api/exam/{exam_id}/answer", json={
+        "exam_id": exam_id, "question_id": qid2, "user_answer": "对", "time_spent_seconds": 1,
+    }, headers=headers)
+    assert r.status_code == 400
+    assert "不属于本次考试" in r.text
+
+    # 删除题库：#19 检查对损坏 bank_ids 此前必 500；降级后按无引用放行
+    assert client.delete(f"/api/question-banks/{bank}", headers=headers).status_code == 204
 def test_146_fill_answer_rejects_empty_array(client):
     """填空题答案为空数组时，导入/新建/编辑三条路径均应 400 拒绝（issue #146）。
     空数组入库会生成 blank_count=0 的畸形题：前端渲染 0 个输入框无法作答，
