@@ -1232,7 +1232,9 @@ function renderOptions(options, userAnswer, correctAnswer) {
 }
 
 function selectMode(el) {
-  $$('.mode-card').forEach(c => c.classList.remove('active'));
+  // 与 selectTimerMode 同口径用 data 属性限定作用域：计时卡片同为 .mode-card，
+  // 按类名全清会把用户选好的整卷计时静默重置回单题计时（issue #152）
+  $$('[data-mode]').forEach(c => c.classList.remove('active'));
   el.classList.add('active');
 }
 
