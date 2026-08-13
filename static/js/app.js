@@ -2163,7 +2163,8 @@ function confirmDeleteBank(id) {
   const card = document.querySelector(`[data-bank-id="${id}"]`)?.closest('.card');
   const title = card ? card.querySelector('.card-title')?.textContent : '(未知)';
   if (!confirm(`确定删除题库「${title}」吗？该操作不可恢复。`)) return;
-  api.deleteBank(id).then(() => router.navigate('/banks')).catch(err => alert(err.message));
+  // 当前已在 #/banks，同 hash 赋值不触发 hashchange，须 resolve 强制重渲染（issue #153，同 doDeleteQuestion 口径）
+  api.deleteBank(id).then(() => router.resolve()).catch(err => alert(err.message));
 }
 
 function updateQuestionCount() {
