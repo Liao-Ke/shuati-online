@@ -26,7 +26,7 @@
 | `models.py` | 6 个 ORM 模型，全项目唯一的数据层 |
 | `schemas.py` | Pydantic 请求/响应模型，不含业务逻辑 |
 | `auth.py` | JWT 签发/验证、密码 hash、`get_current_user` 依赖 |
-| `logging_config.py` | 日志配置（结构化的 JSON 日志） |
+| `logging_config.py` | 日志配置（纯文本单行格式：`时间 [级别] logger - 消息`） |
 | `utils.py` | 工具函数，含 `parse_json_field()` JSON 反序列化 |
 
 ### 后端路由
@@ -41,7 +41,7 @@
 | `routers/wrong_answers.py` | 错题列表，按题库分组，去重 |
 | `routers/review.py` | 背题模式：筛选题目、标记掌握状态、统计 |
 | `routers/questions.py` | 题目 CURD：新增、编辑、删除单道题目 |
-| `routers/limiter.py` | 登录限流（基于 IP 的失败计数与锁定） |
+| `routers/limiter.py` | slowapi 固定窗口限流（按远端地址 5/minute，登录与注册均受限；不区分请求成败、无锁定状态） |
 
 ### 前端
 
@@ -57,45 +57,39 @@
 ## 3. ER 关系
 
 ```
-┌──────────────┐        ┌──────────────────┐
-│     User     │        │  QuestionBank    │
-│──────────────│        │──────────────────│
-│ id (PK)      │──1:N──→│ id (PK)          │
-│ username     │        │ user_id (FK)     │
-│ password_hash│        │ title            │
-│              │        │ description      │
-└──────────────┘        └────────┬─────────┘
-                                 │ 1:N
-                                 │
-                    ┌────────────▼──────────┐
-                    │       Question        │
-                    │───────────────────────│
-                    │ id (PK)               │
-                    │ bank_id (FK)          │
-                    │ type (choice/fill/judge/multiple)│
-                    │ chapter, content       │
-                    │ options (JSON str|null)│
-                    │ answer (str/JSON str)  │
-                    │ analysis               │
-                    └────────────┬───────────┘
-                                 │
-              ┌──────────────────┼──────────────────┐
-              │ 1:N              │ 1:N              │ 1:N
-              │                  │                  │
-   ┌──────────▼──────────┐  ┌───▼──────────┐  ┌────▼─────────┐
-   │    ExamRecord       │  │ AnswerRecord │  │ ReviewRecord │
-   │─────────────────────│  │──────────────│  │──────────────│
-   │ id (PK)             │  │ id (PK)      │  │ id (PK)      │
-   │ user_id (FK)        │──│ exam_id (FK) │  │ user_id (FK) │
-   │ bank_ids (JSON str) │  │ question_id  │  │ question_id  │
-   │ mode (seq/random)   │  │ user_answer  │  │ status       │
-   │ question_count      │  │ is_correct   │  │ reviewed_at  │
-   │ question_ids (JSON) │  │ time_spent   │  │ review_count │
-   │ status (in_progress │  └──────────────┘  │  (uq: user_id │
-   │  /completed)        │                    │  + question) │
-   │ timer_mode          │                    └──────────────┘
-   └─────────────────────┘
+┌──────────────┐        ┌──────────────────┐        ┌──────────────────────┐
+│     User     │──1:N──→│  QuestionBank    │──1:N──→│      Question        │
+│──────────────│        │──────────────────│        │──────────────────────│
+│ id (PK)      │        │ id (PK)          │        │ id (PK)              │
+│ username     │        │ user_id (FK)     │        │ bank_id (FK)         │
+│ password_hash│        │ title            │        │ type/chapter/content │
+└──────┬───────┘        │ description      │        │ options (JSON|null)  │
+       │ 1:N            └──────────────────┘        │ answer (str/JSON str)│
+       ▼                                            │ analysis             │
+┌─────────────────────┐                             └──────┬───────┬───────┘
+│    ExamRecord       │                                    │ 1:N   │ 1:N
+│─────────────────────│                                    │       │
+│ id (PK)             │        ┌──────────────────┐        │       │
+│ user_id (FK)        │──1:N──→│  AnswerRecord    │←───────┘       │
+│ bank_ids (JSON str) │        │──────────────────│                ▼
+│ mode (seq/random)   │        │ id (PK)          │        ┌──────────────┐
+│ question_count      │        │ exam_id (FK)     │        │ ReviewRecord │
+│ question_ids (JSON) │        │ question_id (FK, │        │──────────────│
+│ status (in_progress │        │   null=题已删留痕)│        │ id (PK)      │
+│  /completed)        │        │ question_snapshot│        │ user_id (FK) │
+│ timer_mode          │        │ user_answer      │        │ question_id  │
+└─────────────────────┘        │ is_correct       │        │ status       │
+                               │ time_spent       │        │ reviewed_at  │
+                               └──────────────────┘        │ review_count │
+                                                           │ (uq: user_id │
+                                                           │  + question) │
+                                                           └──────────────┘
 ```
+
+外键关系全集：User→QuestionBank / User→ExamRecord / User→ReviewRecord（图中省略连线）；
+QuestionBank→Question；ExamRecord→AnswerRecord；Question→AnswerRecord（`question_id`
+可为 null，删题留痕）、Question→ReviewRecord（删题级联删除）。
+**ExamRecord 与 Question 之间没有外键关系**——本场题目集合以 `question_ids` JSON 快照保存。
 
 ---
 
@@ -244,6 +238,5 @@ if question_ids: 过滤到选中的子集
 | 问题 | 影响 | 可能方案 |
 |------|------|----------|
 | SQLite 不支持并发写 | 多个请求同时写数据库可能报错 | SQLite WAL 模式 / 切换到 PostgreSQL |
-| 答题中途退出不保存 | 浏览器关闭或刷新后进行中的答题丢失 | 支持暂停/恢复（前端 localStorage + 后端保存状态） |
 | 前端全局变量管理 | 页面复杂后状态容易混乱 | 引入简单的状态管理器 |
 | 仅支持题库 JSON 导出 | 不支持答题记录导出或 CSV 格式 | 添加 CSV/批量导出接口 |

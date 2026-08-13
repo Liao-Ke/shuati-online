@@ -79,7 +79,7 @@
 | `bank_ids` | Text | NOT NULL | | JSON 数组，所选题库 ID 列表 |
 | `mode` | String(10) | NOT NULL | | `sequential`（顺序）或 `random`（随机） |
 | `question_count` | Integer | | 0 | 题目总数 |
-| `question_ids` | Text | NULLABLE | | JSON 数组或 null；随机抽题子集时记录选中题目 ID 列表 |
+| `question_ids` | Text | NULLABLE | | JSON 数组；开考时写入本场题目 id 快照（全量/抽子集/错题练习均写入），恢复与取题以此为准。null 仅存在于快照机制（#22）上线前的历史考试 |
 | `correct_count` | Integer | | 0 | 正确数 |
 | `wrong_count` | Integer | | 0 | 错误数 |
 | `duration_seconds` | Integer | | 0 | 总用时（秒） |
@@ -126,6 +126,8 @@
 
 **唯一约束：** `(user_id, question_id)` 联合唯一 (`uq_user_question_review`)。
 
+**索引：** `question_id` 上普通索引（外键索引，级联删除定位用）；`user_id` 由联合唯一约束的前导列覆盖，不单独建。
+
 **级联：** 删除 `Question` 时本表记录随之删除，见下文「题目删除时关联记录的两种策略」。
 
 ---
@@ -169,3 +171,7 @@ SQLite 普通 `INTEGER PRIMARY KEY` 是 rowid 别名，会复用已删除行的 
 ### 唯一索引选择
 
 `ReviewRecords` 使用 `UniqueConstraint("user_id", "question_id")` 而非普通唯一索引，因为这是业务语义约束——每个用户对每道题只能有一个掌握状态。`username` 直接设 `unique=True` 是 SQLAlchemy 语法糖，效果等价于唯一索引。
+
+### 索引布局：外键列建索引，主键不建二级索引（issue #137）
+
+历史上 6 个 `index=True` 全部加在 `id` 主键上——SQLite 的 `INTEGER PRIMARY KEY` 即 rowid 别名，这些二级索引永远不会被查询计划选中，纯属写放大；而参与 join/filter 的外键列（按题库列题、按考试取答题记录、历史列表等热点查询）全表扫。migration `a1f7c2d3e4b5` 将索引布局翻转：6 个外键列（`question_banks.user_id`、`questions.bank_id`、`exam_records.user_id`、`answer_records.exam_id`、`answer_records.question_id`、`review_records.question_id`）建 `ix_<表>_<列>` 索引，6 个主键冗余索引删除。`review_records.user_id` 由联合唯一约束前导列覆盖，不单独建。models.py 的 `index=True` 与迁移索引名一致，create_all 新库与迁移升级库的索引集合已实测相同。
