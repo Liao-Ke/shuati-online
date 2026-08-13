@@ -180,42 +180,37 @@ alembic upgrade head
 ### 运行测试
 
 ```bash
-pytest test_integration.py -v
+# 后端全量（目录收集，与 CI 一致；勿逐个点名文件——曾因此漏跑 test_auth.py，issue #138）
+pytest -v
+
+# 单个测试（#140 后所有用例可独立运行）
+pytest test_integration.py::test_xxx -v
+
+# 前端测试（Node 内置 test runner，无 npm 依赖）
+node --test tests/frontend/*.test.js
 ```
 
 ### 测试说明
 
-- 单文件集成测试，覆盖全流程：注册 → 导入 → 答题 → 结果 → 错题 → 历史 → 仪表盘 → 删除
-- 使用 `TestClient`（FastAPI 内置），**不需要**额外安装 `httpx`
+- 后端测试共 3 个文件：`test_integration.py`（集成全流程）、`test_auth.py`（认证单元）、
+  `test_migration.py`（自管临时库、真跑 alembic，覆盖 create_all 走不到的迁移路径）
+- 根 `conftest.py` 把 `DATABASE_URL` 指向隔离临时库（#140/#141）——集成测试**不触碰**开发库 `exam.db`
+- `TestClient` 基于 `httpx`（`requirements.txt` 已显式依赖）
 - 每次运行使用随机 UUID 用户名，避免重复注册冲突
-- 测试顺序依赖（前一个测试的结果被后一个复用），新增测试追加在末尾
+- #140/#142 起**无测试间顺序依赖**，全部用例可独立运行；新增测试仍惯例追加在文件末尾（减少多 PR 冲突面）
 
 ### 测试编写规范
 
 ```python
-# 使用 pytest fixtures 和模块级 State 传递共享数据
-class State:
-    token: str = ""
-    exam_id: int = 0
-
-@pytest.fixture(scope="session")
-def client():
-    from main import app
-    from fastapi.testclient import TestClient
-    return TestClient(app)
-
-@pytest.fixture(scope="session")
-def auth_headers(client):
-    """注册用户并返回认证头"""
-    import uuid
-    username = f"test_{uuid.uuid4().hex[:8]}"
-    r = client.post("/api/auth/register", json={"username": username, "password": "123456"})
+# 共享 fixture 见 test_integration.py 顶部，遵守其只读契约：
+# - session 级 bank_id 是只读共享题库（5 题），仅用于开考/筛选/4xx 校验等不改内容的场景
+# - 会突变题库的场景用函数级 own_bank
+# - 需要精确断言用户级全局计数（错题数、背题统计等）用 _register_isolated_user
+def test_example(client, auth_headers, bank_id):
+    r = client.get("/api/question-banks", headers=auth_headers)
     assert r.status_code == 200
-    State.token = r.json()["access_token"]
-    return {"Authorization": f"Bearer {State.token}"}
 
-def test_example(auth_headers):
-    assert State.token is not None
+# 反模式（#142 已移除，勿再引入）：模块级 State 共享数据、测试间顺序依赖
 ```
 
 ### 手动测试
@@ -312,7 +307,7 @@ db.commit()
 | 事项 | 说明 |
 |------|------|
 | 数据库并发 | SQLite 默认不支持并发写。如果服务在多人场景下出现 `database is locked` 错误，可启用 WAL 模式 |
-| 测试隔离 | 集成测试使用随机用户名，但数据库是同一个 `exam.db`。业务数据隔离开销低，但不要依赖测试间的数据清理 |
+| 测试隔离 | 集成测试落在 conftest 指定的隔离临时库（#140/#141），不触碰开发库 `exam.db`；`test_migration.py` 自管临时库 |
 | 静态文件缓存 | 修改 CSS/JS 后浏览器可能缓存旧版本。开发时使用 `--reload` 并配合浏览器硬刷新（Ctrl+F5） |
 | 依赖安装 | 如果某些库安装失败（如 `bcrypt` 需要 C 扩展），可尝试：`pip install bcrypt==4.0.1 --no-binary bcrypt` |
 | Python 路径 | 如果使用项目中的 `sys.path.insert(0, '.')`（测试文件），确保工作目录是项目根目录 |
