@@ -45,14 +45,20 @@ function saveExamTimeouts(choice, multi, fill) {
   sessionStorage.setItem('examTimeouts', JSON.stringify({ choice, multi, fill }));
 }
 
-function getExamTimeoutSeconds(type) {
-  let timeouts = {};
+// sessionStorage 可能被手动篡改，损坏的 JSON 按不存在处理并清掉，避免启动流程抛异常白屏（issue #155）
+function safeSessionJSON(key, fallback) {
+  const raw = sessionStorage.getItem(key);
+  if (!raw) return fallback;
   try {
-    timeouts = JSON.parse(sessionStorage.getItem('examTimeouts') || '{}');
+    return JSON.parse(raw);
   } catch {
-    // ponytail: sessionStorage 可能被手动篡改；损坏时回退默认时长即可，未来若 sessionStorage JSON 变多再抽通用 safeParse。
-    timeouts = {};
+    sessionStorage.removeItem(key);
+    return fallback;
   }
+}
+
+function getExamTimeoutSeconds(type) {
+  const timeouts = safeSessionJSON('examTimeouts', {});
   if (type === 'choice') return timeouts.choice || 30;
   if (type === 'multiple') return timeouts.multi || 45;
   return timeouts.fill || 60;
@@ -284,7 +290,7 @@ router.add('/banks', async () => {
             <div class="card-body">
               <h5 class="card-title">${escHtml(b.title)}</h5>
               <p class="card-text text-muted">${b.question_count} 题 · ${b.description ? escHtml(b.description) : ''}</p>
-              <p class="card-text"><small class="text-muted">更新于 ${new Date(b.updated_at).toLocaleDateString('zh-CN')}</small></p>
+              <p class="card-text"><small class="text-muted">更新于 ${parseUtcDate(b.updated_at).toLocaleDateString('zh-CN')}</small></p>
               <a href="#/banks/${b.id}" class="btn btn-outline-primary btn-sm">详情</a>
               <button class="btn btn-outline-danger btn-sm ms-1" data-bank-id="${b.id}" onclick="confirmDeleteBank(this.dataset.bankId)">删除</button>
             </div>
@@ -968,8 +974,8 @@ async function startReview() {
 router.add('/review', async () => {
   showNav();
   if (!reviewFilter) {
-    const saved = sessionStorage.getItem('reviewFilter');
-    if (saved) { reviewFilter = JSON.parse(saved); } else { router.navigate('/review/setup'); return; }
+    reviewFilter = safeSessionJSON('reviewFilter', null);
+    if (!reviewFilter) { router.navigate('/review/setup'); return; }
   }
   render('<div class="text-center py-5"><div class="spinner-border"></div></div>');
   try {
@@ -2444,8 +2450,7 @@ async function saveBankEdit() {
 async function init() {
   const savedExamId = sessionStorage.getItem('activeExamId');
   if (savedExamId) examId = parseInt(savedExamId);
-  const savedFilter = sessionStorage.getItem('reviewFilter');
-  if (savedFilter) reviewFilter = JSON.parse(savedFilter);
+  reviewFilter = safeSessionJSON('reviewFilter', null);
   const savedMode = sessionStorage.getItem('examMode');
   if (savedMode) examFullPreview = savedMode === 'preview';
   const savedIdx = sessionStorage.getItem('examCurrentIndex');
