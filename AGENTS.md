@@ -64,6 +64,8 @@ features/              # 功能实现说明文档（历史位置，与 docs/feat
 |---------|--------|------|
 | `DATABASE_URL` | `sqlite:///./exam.db` | 数据库连接 |
 | `SECRET_KEY` | 无默认值 | JWT 签名密钥。缺省时自动生成并持久化到 `.secret_key`（开发用，#8）；**生产环境必须显式设置** |
+| `CORS_ORIGINS` | `*` | 跨域来源白名单，逗号分隔；通配时自动关闭 credentials（main.py） |
+| `ALLOWED_HOSTS` | `*` | TrustedHostMiddleware 的 Host 白名单，逗号分隔（main.py） |
 
 ## 代码约定
 
