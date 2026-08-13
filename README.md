@@ -78,6 +78,7 @@ docker compose up -d
 | `/api/exam/{id}/progress` | GET | 答题进度 |
 | `/api/exam/{id}/finish` | POST | 结束答题 |
 | `/api/exam/{id}/result` | GET | 答题结果 |
+| `/api/exam/unfinished` | GET | 未完成考试列表（恢复入口） |
 | `/api/history` | GET | 练习历史（分页） |
 | `/api/history/{id}` | GET | 历史详情 |
 | `/api/question-banks` | GET | 题库列表 |
@@ -97,6 +98,7 @@ docker compose up -d
 | `/api/wrong-answers` | GET | 错题本 |
 | `/api/wrong-answers/start` | POST | 错题练习 |
 | `/api/dashboard` | GET | 首页统计 |
+| `/api/health` | GET | 健康检查（无需认证） |
 
 ## 配置
 
@@ -104,6 +106,8 @@ docker compose up -d
 |---------|--------|------|
 | `DATABASE_URL` | `sqlite:///./exam.db` | 数据库连接。Docker 下为 `sqlite:///./data/exam.db` |
 | `SECRET_KEY` | **无默认值（生产环境必须设置）** | JWT 签名密钥。开发环境未设置时自动生成并持久化到 `.secret_key` 文件，重启后复用；生产环境通过环境变量注入 |
+| `CORS_ORIGINS` | `*` | 允许的跨域来源，逗号分隔。通配时自动关闭 credentials；生产环境建议收紧为实际前端域名 |
+| `ALLOWED_HOSTS` | `*` | Host 白名单，逗号分隔。生产环境建议设为实际域名 |
 
 ## 题库格式
 
