@@ -10,7 +10,7 @@ from auth import get_current_user
 from database import get_db
 from models import ExamRecord, Question, QuestionBank, User
 from schemas import BankDetail, BankImport, BankOut, BankUpdate, BatchImportResponse, ImportResult, QuestionOut
-from utils import parse_answer, parse_json_field
+from utils import parse_answer, parse_json_list
 
 logger = logging.getLogger("shuati")
 
@@ -197,7 +197,8 @@ def delete_bank(bank_id: int, user: User = Depends(get_current_user), db: Sessio
         ExamRecord.user_id == user.id, ExamRecord.status == "in_progress",
     ).all()
     for exam in in_progress:
-        if bank_id in (parse_json_field(exam.bank_ids) or []):
+        # 损坏快照按空列表处理，勿让 int in str 抛 500（issue #172）
+        if bank_id in parse_json_list(exam.bank_ids):
             raise HTTPException(status_code=409, detail="该题库被进行中的考试引用，请先完成或放弃考试")
     logger.info(f"用户 {user.id} 删除题库：{bank.title}")
     db.delete(bank)
