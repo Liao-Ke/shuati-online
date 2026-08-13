@@ -79,7 +79,7 @@
 | `bank_ids` | Text | NOT NULL | | JSON 数组，所选题库 ID 列表 |
 | `mode` | String(10) | NOT NULL | | `sequential`（顺序）或 `random`（随机） |
 | `question_count` | Integer | | 0 | 题目总数 |
-| `question_ids` | Text | NULLABLE | | JSON 数组或 null；随机抽题子集时记录选中题目 ID 列表 |
+| `question_ids` | Text | NULLABLE | | JSON 数组；开考时写入本场题目 id 快照（全量/抽子集/错题练习均写入），恢复与取题以此为准。null 仅存在于快照机制（#22）上线前的历史考试 |
 | `correct_count` | Integer | | 0 | 正确数 |
 | `wrong_count` | Integer | | 0 | 错误数 |
 | `duration_seconds` | Integer | | 0 | 总用时（秒） |
