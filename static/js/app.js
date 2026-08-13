@@ -45,14 +45,20 @@ function saveExamTimeouts(choice, multi, fill) {
   sessionStorage.setItem('examTimeouts', JSON.stringify({ choice, multi, fill }));
 }
 
-function getExamTimeoutSeconds(type) {
-  let timeouts = {};
+// sessionStorage 可能被手动篡改，损坏的 JSON 按不存在处理并清掉，避免启动流程抛异常白屏（issue #155）
+function safeSessionJSON(key, fallback) {
+  const raw = sessionStorage.getItem(key);
+  if (!raw) return fallback;
   try {
-    timeouts = JSON.parse(sessionStorage.getItem('examTimeouts') || '{}');
+    return JSON.parse(raw);
   } catch {
-    // ponytail: sessionStorage 可能被手动篡改；损坏时回退默认时长即可，未来若 sessionStorage JSON 变多再抽通用 safeParse。
-    timeouts = {};
+    sessionStorage.removeItem(key);
+    return fallback;
   }
+}
+
+function getExamTimeoutSeconds(type) {
+  const timeouts = safeSessionJSON('examTimeouts', {});
   if (type === 'choice') return timeouts.choice || 30;
   if (type === 'multiple') return timeouts.multi || 45;
   return timeouts.fill || 60;
@@ -81,13 +87,17 @@ async function checkAuth() {
   try {
     state.user = await api.me();
     return true;
-  } catch {
-    api.setToken(null);
+  } catch (err) {
+    // 只有服务端明确 401 才销毁本地凭证；网络层失败（fetch 抛错，无 err.status）
+    // 保留 token，服务恢复后刷新即可恢复会话（issue #156）
+    if (err.status === 401) api.setToken(null);
     return false;
   }
 }
 
 router.add('/login', async () => {
+  // 已登录用户（含根路径空 hash 回退到 /login 的场景）直接进仪表盘，不再渲染登录表单（issue #160）
+  if (state.user) { router.navigate('/dashboard'); return; }
   render(`
     <div class="auth-page">
       <div class="auth-card">
@@ -134,6 +144,7 @@ router.add('/login', async () => {
 });
 
 router.add('/register', () => {
+  if (state.user) { router.navigate('/dashboard'); return; }
   render(`
     <div class="auth-page">
       <div class="auth-card">
@@ -281,7 +292,7 @@ router.add('/banks', async () => {
             <div class="card-body">
               <h5 class="card-title">${escHtml(b.title)}</h5>
               <p class="card-text text-muted">${b.question_count} 题 · ${b.description ? escHtml(b.description) : ''}</p>
-              <p class="card-text"><small class="text-muted">更新于 ${new Date(b.updated_at).toLocaleDateString('zh-CN')}</small></p>
+              <p class="card-text"><small class="text-muted">更新于 ${parseUtcDate(b.updated_at).toLocaleDateString('zh-CN')}</small></p>
               <a href="#/banks/${b.id}" class="btn btn-outline-primary btn-sm">详情</a>
               <button class="btn btn-outline-danger btn-sm ms-1" data-bank-id="${b.id}" onclick="confirmDeleteBank(this.dataset.bankId)">删除</button>
             </div>
@@ -986,8 +997,8 @@ async function startReview() {
 router.add('/review', async () => {
   showNav();
   if (!reviewFilter) {
-    const saved = sessionStorage.getItem('reviewFilter');
-    if (saved) { reviewFilter = JSON.parse(saved); } else { router.navigate('/review/setup'); return; }
+    reviewFilter = safeSessionJSON('reviewFilter', null);
+    if (!reviewFilter) { router.navigate('/review/setup'); return; }
   }
   render('<div class="text-center py-5"><div class="spinner-border"></div></div>');
   try {
@@ -1057,7 +1068,13 @@ function renderReviewPage() {
         return `<div class="${cls}">${i === 0 ? 'A' : 'B'}. ${v}</div>`;
       }).join('');
     }
-    const correctDisplay = q.answer || '';
+    // 多选/多空的 answer 是 DB 里的 JSON 数组原文，转成 "A, B" 可读格式，
+    // 与结果页/回看页 formatAnswerText 口径一致（issue #159）
+    let correctDisplay = q.answer || '';
+    try {
+      const parsed = JSON.parse(correctDisplay);
+      if (Array.isArray(parsed)) correctDisplay = formatAnswerText(parsed);
+    } catch { /* choice/judge/单空 fill 不是 JSON，原样展示 */ }
     const analysisDisplay = q.analysis ? `<div class="review-analysis mt-2">解析：${escHtml(q.analysis)}</div>` : '';
     html += `
       <div class="review-question-card card mb-3" data-id="${q.id}">
@@ -1236,7 +1253,9 @@ function renderOptions(options, userAnswer, correctAnswer) {
 }
 
 function selectMode(el) {
-  $$('.mode-card').forEach(c => c.classList.remove('active'));
+  // 与 selectTimerMode 同口径用 data 属性限定作用域：计时卡片同为 .mode-card，
+  // 按类名全清会把用户选好的整卷计时静默重置回单题计时（issue #152）
+  $$('[data-mode]').forEach(c => c.classList.remove('active'));
   el.classList.add('active');
 }
 
@@ -2175,7 +2194,8 @@ function confirmDeleteBank(id) {
   const card = document.querySelector(`[data-bank-id="${id}"]`)?.closest('.card');
   const title = card ? card.querySelector('.card-title')?.textContent : '(未知)';
   if (!confirm(`确定删除题库「${title}」吗？该操作不可恢复。`)) return;
-  api.deleteBank(id).then(() => router.navigate('/banks')).catch(err => alert(err.message));
+  // 当前已在 #/banks，同 hash 赋值不触发 hashchange，须 resolve 强制重渲染（issue #153，同 doDeleteQuestion 口径）
+  api.deleteBank(id).then(() => router.resolve()).catch(err => alert(err.message));
 }
 
 function updateQuestionCount() {
@@ -2462,8 +2482,7 @@ async function saveBankEdit() {
 async function init() {
   const savedExamId = sessionStorage.getItem('activeExamId');
   if (savedExamId) examId = parseInt(savedExamId);
-  const savedFilter = sessionStorage.getItem('reviewFilter');
-  if (savedFilter) reviewFilter = JSON.parse(savedFilter);
+  reviewFilter = safeSessionJSON('reviewFilter', null);
   const savedMode = sessionStorage.getItem('examMode');
   if (savedMode) examFullPreview = savedMode === 'preview';
   const savedIdx = sessionStorage.getItem('examCurrentIndex');
