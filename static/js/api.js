@@ -34,13 +34,21 @@ const api = {
     }
     const res = await fetch(`${API_BASE}${path}`, opts);
     if (res.status === 204) return null;
-    const data = await res.json();
+    // 网关 502/504 HTML 错误页、500 空 body 不是 JSON：解析失败不抛 SyntaxError，
+    // 统一落到带状态码的可读错误，保住调用点对 err.status 的分支判断（issue #157）
+    let data;
+    try { data = await res.json(); } catch { data = undefined; }
     if (!res.ok) {
       if (res.status === 401) _handle401(path);
       const msg = res.status === 429
         ? '请求过于频繁，请稍后重试'
-        : (data.detail || data.error || '请求失败');
+        : ((data && (data.detail || data.error)) || `请求失败(${res.status})`);
       const err = new Error(msg);
+      err.status = res.status;
+      throw err;
+    }
+    if (data === undefined) {
+      const err = new Error(`响应解析失败(${res.status})`);
       err.status = res.status;
       throw err;
     }
