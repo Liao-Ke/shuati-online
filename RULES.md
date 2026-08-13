@@ -52,7 +52,11 @@
 ├── utils.py                # 工具函数（JSON 反序列化等）
 ├── requirements.txt        # 依赖清单
 ├── alembic.ini             # Alembic 配置
-├── test_integration.py     # 集成测试（单文件）
+├── conftest.py             # 测试根配置：集成测试落隔离临时库（#140）
+├── test_integration.py     # 集成测试（#140 后全部用例可独立运行）
+├── test_auth.py            # 认证单元测试
+├── test_migration.py       # 迁移测试（自管临时库，真跑 alembic）
+├── pyproject.toml          # 工具配置（ruff 等）
 ├── Dockerfile              # 容器构建
 ├── docker-compose.yml      # 容器编排
 ├── AGENTS.md               # Agent 指南
@@ -73,8 +77,11 @@
 │
 ├── alembic/                # 数据库迁移
 │   ├── env.py
-│   └── versions/
-│       └── 519b18b6e049_initial_schema.py
+│   └── versions/           # 迁移链（初始 schema → 孤儿清理 → 答题快照 → 主键 AUTOINCREMENT …）
+│       ├── 519b18b6e049_initial_schema.py
+│       ├── afa1757b2ecd_cleanup_orphan_review_records.py
+│       ├── fc868b9a7b87_add_answer_question_snapshot.py
+│       └── 3159d3fe4acc_pk_autoincrement_no_rowid_reuse.py
 │
 ├── static/                 # 前端 SPA
 │   ├── index.html          # SPA 入口
@@ -82,6 +89,9 @@
 │   └── js/
 │       ├── api.js          # API 调用层
 │       └── app.js          # 路由 + 渲染
+│
+├── tests/
+│   └── frontend/           # 前端测试（node --test，无 npm 依赖）
 │
 ├── docs/                   # 项目文档
 │   ├── prd/                # PRD
