@@ -58,6 +58,8 @@ features/              # 功能实现说明文档
 |---------|--------|------|
 | `DATABASE_URL` | `sqlite:///./exam.db` | 数据库连接 |
 | `SECRET_KEY` | `exam-platform-secret-key-change-in-production` | **生产环境必须修改** |
+| `CORS_ORIGINS` | `*` | 跨域来源白名单，逗号分隔；通配时自动关闭 credentials（main.py） |
+| `ALLOWED_HOSTS` | `*` | TrustedHostMiddleware 的 Host 白名单，逗号分隔（main.py） |
 
 ## 代码约定
 
