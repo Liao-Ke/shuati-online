@@ -37,7 +37,8 @@ function loadExamRoute() {
   };
   const context = {
     console,
-    location: { hash: '' },
+    // 模拟真实考试页 hash：#151 的 stale-guard 只放行 /exam 路由上的切题响应
+    location: { hash: '#/exam' },
     window: { addEventListener() {}, removeEventListener() {}, scrollTo() {} },
     setTimeout() {},
     clearInterval() {},
@@ -45,7 +46,7 @@ function loadExamRoute() {
     document: documentStub,
     api: {
       getExamProgress: async () => ({ total_count: 3, current_index: 0, answers: [] }),
-      // 返回 question:null 让 loadQuestionByIndex 提前返回，不影响恢复流程断言
+      // 返回 question:null 让 loadQuestionByIndex 走“无题跳结果页”分支，不影响恢复流程断言
       getCurrentQuestion: async () => ({ question: null }),
     },
     sessionStorage: {

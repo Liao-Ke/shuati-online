@@ -73,7 +73,11 @@ let examTimeoutSeconds = 30;
 let examCurrentIndex = 0;
 let examProgress = null;
 let examPaused = false;
-let examPauseRemaining = 0;
+// null 表示“没有进行中的单题倒计时”，与 resumeExam 守卫语义一致；
+// 暂停时若有倒计时则存暂停瞬间剩余秒数（≥0 的数字）。
+let examPauseRemaining = null;
+// 暂停期间切题请求才完成时置 true：恢复时为新渲染的未答题补启动全新倒计时
+let examPendingTimer = false;
 let examFullPreview = false;
 let examScrollTimer = null;
 let examTimerMode = 'per_question';
@@ -81,6 +85,33 @@ let examStartedAt = null;
 let examElapsedInterval = null;
 let examElapsedOffset = 0;
 let unfinishedExams = [];
+
+// 统一停止单题倒计时。只 clearInterval 不置 null 会残留陈旧 interval ID，
+// 使 examTimerInterval !== null 无法真实反映“有倒计时在跑”，
+// 暂停/恢复守卫（issue #151 入口一）依赖该不变式，所有清理点必须走这里。
+function stopExamTimer() {
+  if (examTimerInterval !== null) {
+    clearInterval(examTimerInterval);
+    examTimerInterval = null;
+  }
+}
+
+// 统一停止整卷计时。与单题倒计时同一不变式：
+// examElapsedInterval !== null ⇔ 整卷计时正在运行（issue #115 的 elapsed 计时）。
+function stopElapsedTimer() {
+  if (examElapsedInterval !== null) {
+    clearInterval(examElapsedInterval);
+    examElapsedInterval = null;
+  }
+}
+
+// 离开考试页即停掉单题倒计时：后台归零会以 null 答案静默提交当前题、
+// 甚至用新 examId + 旧题号交叉提交到新考试（issue #151 入口二）。
+// 判路由与 showNav 同口径：忽略 query 串，避免“#/exam?x=y”被误判为已离开。
+window.addEventListener('hashchange', () => {
+  const hash = location.hash.replace(/^#/, '').split('?')[0];
+  if (hash !== '/exam') stopExamTimer();
+});
 
 async function checkAuth() {
   if (!api.token) return false;
@@ -525,7 +556,8 @@ router.add('/exam', async () => {
     </div>
   `);
   examPaused = false;
-  examPauseRemaining = 0;
+  examPauseRemaining = null;
+  examPendingTimer = false;
   document.removeEventListener('keydown', examKeyHandler);
   const savedIdx = sessionStorage.getItem('examCurrentIndex');
   if (savedIdx) examCurrentIndex = parseInt(savedIdx);
@@ -593,7 +625,7 @@ function examKeyHandler(e) {
 }
 
 router.add('/result/:id', async ({ id }) => {
-  if (examElapsedInterval) clearInterval(examElapsedInterval);
+  stopElapsedTimer();
   window.removeEventListener('scroll', trackPreviewScroll);
   showNav();
   render('<div class="text-center py-5"><div class="spinner-border"></div></div>');
@@ -1165,8 +1197,8 @@ function escHtml(s) {
 }
 
 function resetSessionState() {
-  if (examTimerInterval) { clearInterval(examTimerInterval); examTimerInterval = null; }
-  if (examElapsedInterval) { clearInterval(examElapsedInterval); examElapsedInterval = null; }
+  stopExamTimer();
+  stopElapsedTimer();
   if (examScrollTimer) { clearTimeout(examScrollTimer); examScrollTimer = null; }
   window.removeEventListener('scroll', trackPreviewScroll);
   const sessionKeys = ['activeExamId', 'examCurrentIndex', 'examMode', 'examTimerMode', 'examStartedAt', 'examElapsedOffset', 'examTimeouts', 'reviewFilter'];
@@ -1178,7 +1210,8 @@ function resetSessionState() {
   examCurrentIndex = 0;
   examProgress = null;
   examPaused = false;
-  examPauseRemaining = 0;
+  examPauseRemaining = null;
+  examPendingTimer = false;
   examFullPreview = false;
   examTimeoutSeconds = 30;
   examTimerMode = 'per_question';
@@ -1489,11 +1522,20 @@ function goToQuestion(index) {
 }
 
 async function loadQuestionByIndex(index) {
-  if (examTimerInterval) clearInterval(examTimerInterval);
+  // 切题先停旧倒计时并置空引用；新题渲染后按需重启（issue #151 入口一不变式）
+  stopExamTimer();
+  // 每次切题都重新评估“恢复时是否需要补启动倒计时”，避免携带上一题的挂起标记
+  examPendingTimer = false;
   if (!examId) return;
+  const requestedExamId = examId;
   sessionStorage.setItem('examCurrentIndex', index);
   try {
-    const data = await api.getCurrentQuestion(examId, index);
+    const data = await api.getCurrentQuestion(requestedExamId, index);
+    // 请求在途时考试上下文已变化（离开考试页或已开新考试）：丢弃过期响应，
+    // 防止旧题渲染进新页面/新考试，或离开后在后台启动倒计时归零提交（issue #151 入口二）。
+    // 路由判定与 hashchange 清理监听同口径：忽略 query 串（当前 Router 不匹配带 query
+    // 的 /exam，仅手工改地址栏可达，统一口径避免两处守卫对同一 hash 结论相反）。
+    if (examId !== requestedExamId || location.hash.replace(/^#/, '').split('?')[0] !== '/exam') return;
     if (!data.question) {
       router.navigate(`/result/${examId}`);
       return;
@@ -1611,7 +1653,13 @@ async function loadQuestionByIndex(index) {
     }
 
     if (examTimerMode !== 'elapsed') {
-      startTimer();
+      if (examPaused) {
+        // 暂停期间切题请求才完成：题目先渲染，倒计时推迟到恢复时再启动，
+        // 否则暂停状态下归零会静默提交新题（issue #151 期望行为的边界场景）
+        examPendingTimer = true;
+      } else {
+        startTimer();
+      }
     }
   } catch {
     document.getElementById('exam-content').innerHTML = '<div class="alert alert-danger">加载题目失败</div>';
@@ -1627,12 +1675,14 @@ function navigateExam(delta) {
 
 function pauseExam() {
   if (examPaused) return;
-  clearInterval(examTimerInterval);
-  examTimerInterval = null;
+  // 先记录暂停时是否真有进行中的倒计时：回看已作答题目/整卷模式下倒计时已清，
+  // 恢复时不得从残留的 DOM 文本凭空重启（issue #151 入口一）。
+  // 该判断依赖 stopExamTimer 不变式：examTimerInterval 非 null ⇔ 倒计时正在运行。
+  const hadCountdown = examTimerInterval !== null;
+  stopExamTimer();
   examPaused = true;
   if (examTimerMode === 'elapsed') {
-    clearInterval(examElapsedInterval);
-    examElapsedInterval = null;
+    stopElapsedTimer();
     const timerEl = document.getElementById('exam-timer');
     if (timerEl) {
       examPauseRemaining = parseTime(timerEl.textContent);
@@ -1641,7 +1691,7 @@ function pauseExam() {
     }
   } else {
     const timerEl = document.getElementById('exam-timer');
-    examPauseRemaining = parseTime(timerEl.textContent);
+    examPauseRemaining = hadCountdown ? parseTime(timerEl.textContent) : null;
   }
   document.getElementById('exam-pause-overlay').classList.remove('d-none');
 }
@@ -1654,8 +1704,14 @@ function resumeExam() {
     examStartedAt = new Date().toISOString();
     sessionStorage.setItem('examStartedAt', examStartedAt);
     startElapsedTimer();
-  } else {
+  } else if (examPauseRemaining !== null) {
+    // null 表示暂停时没有进行中的倒计时（回看已作答题/整卷模式），不重启（issue #151 入口一）
+    examPendingTimer = false;
     startTimer(examPauseRemaining);
+  } else if (examPendingTimer) {
+    // 暂停期间新题才加载完成：按该题默认时长补启动全新倒计时
+    examPendingTimer = false;
+    startTimer();
   }
 }
 
@@ -1669,9 +1725,12 @@ function examElapsedSeconds() {
 async function finishExam() {
   if (!confirm('确定要提前结束吗？未答的题目将计为错误。')) return;
   const elapsedSeconds = examElapsedSeconds();
-  if (examPaused) resumeExam();
-  clearInterval(examTimerInterval);
-  if (examElapsedInterval) clearInterval(examElapsedInterval);
+  // 暂停中计时器在 pauseExam 里已全部停掉：先 resume 再 stop 只会白启动一次又立即停掉。
+  // 暂停中直接交卷即可，接口失败时仍保持暂停态，用户可点“继续答题”恢复。
+  if (!examPaused) {
+    stopExamTimer();
+    stopElapsedTimer();
+  }
   try {
     await api.finishExam(examId, elapsedSeconds);
     window.removeEventListener('scroll', trackPreviewScroll);
@@ -1714,7 +1773,8 @@ function trackPreviewScroll() {
 }
 
 function startElapsedTimer() {
-  if (examElapsedInterval) clearInterval(examElapsedInterval);
+  // 重启前先按不变式停掉旧 interval，防止叠加；随后立即赋新值。
+  stopElapsedTimer();
   if (!examStartedAt) examStartedAt = new Date().toISOString();
   const start = new Date(examStartedAt).getTime();
   const update = () => {
@@ -1745,7 +1805,7 @@ async function toggleExamMode() {
   const btn = document.getElementById('mode-toggle-btn');
   if (examFullPreview) {
     // 进入整卷模式：停止单题倒计时，避免归零后后台自动提交当前题（#52）
-    if (examTimerInterval) { clearInterval(examTimerInterval); examTimerInterval = null; }
+    stopExamTimer();
     btn.textContent = '📖 单题模式';
     document.querySelector('.exam-layout')?.classList.add('exam-layout-preview');
     document.getElementById('prev-btn').style.display = 'none';
@@ -2020,7 +2080,8 @@ function startTimer(remaining) {
   const timerEl = document.getElementById('exam-timer');
   timerEl.textContent = formatTime(remaining);
   timerEl.className = 'exam-timer';
-  if (examTimerInterval) clearInterval(examTimerInterval);
+  // 重启前先按不变式停掉旧 interval，防止同页重复调用时叠加多条倒计时
+  stopExamTimer();
   examTimerInterval = setInterval(() => {
     remaining--;
     timerEl.textContent = formatTime(remaining);
@@ -2028,7 +2089,9 @@ function startTimer(remaining) {
     if (remaining <= 10) timerEl.classList.add('timer-danger');
     else if (remaining <= 30) timerEl.classList.add('timer-warning');
     if (remaining <= 0) {
-      clearInterval(examTimerInterval);
+      // 归零自动提交前先置空引用：提交/切题路径同样会停表，
+      // 这里置空确保暂停守卫不会把陈旧 ID 误判为进行中的倒计时（issue #151 入口一）
+      stopExamTimer();
       submitCurrentAnswer();
     }
   }, 1000);
@@ -2044,7 +2107,8 @@ function formatTime(sec) {
 
 async function submitCurrentAnswer() {
   if (!examId) return;
-  clearInterval(examTimerInterval);
+  // 手动提交先停表并置空引用：否则提交后到下一题渲染前，暂停守卫会误判存在倒计时
+  stopExamTimer();
   const btn = document.getElementById('submit-answer-btn');
   if (btn) btn.disabled = true;
 
