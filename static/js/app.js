@@ -67,7 +67,9 @@ let examTimeoutSeconds = 30;
 let examCurrentIndex = 0;
 let examProgress = null;
 let examPaused = false;
-let examPauseRemaining = 0;
+// null 表示“没有进行中的单题倒计时”，与 resumeExam 守卫语义一致；
+// 暂停时若有倒计时则存暂停瞬间剩余秒数（≥0 的数字）。
+let examPauseRemaining = null;
 // 暂停期间切题请求才完成时置 true：恢复时为新渲染的未答题补启动全新倒计时
 let examPendingTimer = false;
 let examFullPreview = false;
@@ -82,16 +84,27 @@ let unfinishedExams = [];
 // 使 examTimerInterval !== null 无法真实反映“有倒计时在跑”，
 // 暂停/恢复守卫（issue #151 入口一）依赖该不变式，所有清理点必须走这里。
 function stopExamTimer() {
-  if (examTimerInterval) {
+  if (examTimerInterval !== null) {
     clearInterval(examTimerInterval);
     examTimerInterval = null;
   }
 }
 
+// 统一停止整卷计时。与单题倒计时同一不变式：
+// examElapsedInterval !== null ⇔ 整卷计时正在运行（issue #115 的 elapsed 计时）。
+function stopElapsedTimer() {
+  if (examElapsedInterval !== null) {
+    clearInterval(examElapsedInterval);
+    examElapsedInterval = null;
+  }
+}
+
 // 离开考试页即停掉单题倒计时：后台归零会以 null 答案静默提交当前题、
-// 甚至用新 examId + 旧题号交叉提交到新考试（issue #151 入口二）
+// 甚至用新 examId + 旧题号交叉提交到新考试（issue #151 入口二）。
+// 判路由与 showNav 同口径：忽略 query 串，避免“#/exam?x=y”被误判为已离开。
 window.addEventListener('hashchange', () => {
-  if (location.hash.replace(/^#/, '') !== '/exam') stopExamTimer();
+  const hash = location.hash.replace(/^#/, '').split('?')[0];
+  if (hash !== '/exam') stopExamTimer();
 });
 
 async function checkAuth() {
@@ -525,7 +538,7 @@ router.add('/exam', async () => {
     </div>
   `);
   examPaused = false;
-  examPauseRemaining = 0;
+  examPauseRemaining = null;
   examPendingTimer = false;
   document.removeEventListener('keydown', examKeyHandler);
   const savedIdx = sessionStorage.getItem('examCurrentIndex');
@@ -580,7 +593,7 @@ function examKeyHandler(e) {
 }
 
 router.add('/result/:id', async ({ id }) => {
-  if (examElapsedInterval) clearInterval(examElapsedInterval);
+  stopElapsedTimer();
   window.removeEventListener('scroll', trackPreviewScroll);
   showNav();
   render('<div class="text-center py-5"><div class="spinner-border"></div></div>');
@@ -1147,7 +1160,7 @@ function escHtml(s) {
 
 function resetSessionState() {
   stopExamTimer();
-  if (examElapsedInterval) { clearInterval(examElapsedInterval); examElapsedInterval = null; }
+  stopElapsedTimer();
   if (examScrollTimer) { clearTimeout(examScrollTimer); examScrollTimer = null; }
   window.removeEventListener('scroll', trackPreviewScroll);
   const sessionKeys = ['activeExamId', 'examCurrentIndex', 'examMode', 'examTimerMode', 'examStartedAt', 'examElapsedOffset', 'examTimeouts', 'reviewFilter'];
@@ -1159,7 +1172,7 @@ function resetSessionState() {
   examCurrentIndex = 0;
   examProgress = null;
   examPaused = false;
-  examPauseRemaining = 0;
+  examPauseRemaining = null;
   examPendingTimer = false;
   examFullPreview = false;
   examTimeoutSeconds = 30;
@@ -1620,8 +1633,7 @@ function pauseExam() {
   stopExamTimer();
   examPaused = true;
   if (examTimerMode === 'elapsed') {
-    clearInterval(examElapsedInterval);
-    examElapsedInterval = null;
+    stopElapsedTimer();
     const timerEl = document.getElementById('exam-timer');
     if (timerEl) {
       examPauseRemaining = parseTime(timerEl.textContent);
@@ -1664,9 +1676,12 @@ function examElapsedSeconds() {
 async function finishExam() {
   if (!confirm('确定要提前结束吗？未答的题目将计为错误。')) return;
   const elapsedSeconds = examElapsedSeconds();
-  if (examPaused) resumeExam();
-  stopExamTimer();
-  if (examElapsedInterval) clearInterval(examElapsedInterval);
+  // 暂停中计时器在 pauseExam 里已全部停掉：先 resume 再 stop 只会白启动一次又立即停掉。
+  // 暂停中直接交卷即可，接口失败时仍保持暂停态，用户可点“继续答题”恢复。
+  if (!examPaused) {
+    stopExamTimer();
+    stopElapsedTimer();
+  }
   try {
     await api.finishExam(examId, elapsedSeconds);
     window.removeEventListener('scroll', trackPreviewScroll);
@@ -1709,7 +1724,8 @@ function trackPreviewScroll() {
 }
 
 function startElapsedTimer() {
-  if (examElapsedInterval) clearInterval(examElapsedInterval);
+  // 重启前先按不变式停掉旧 interval，防止叠加；随后立即赋新值。
+  stopElapsedTimer();
   if (!examStartedAt) examStartedAt = new Date().toISOString();
   const start = new Date(examStartedAt).getTime();
   const update = () => {

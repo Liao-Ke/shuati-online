@@ -173,7 +173,7 @@ test('reset session state clears exam and review browser state', () => {
     examCurrentIndex: 0,
     examProgress: null,
     examPaused: false,
-    examPauseRemaining: 0,
+    examPauseRemaining: null,
     examFullPreview: false,
     examTimerMode: 'per_question',
     examStartedAt: null,

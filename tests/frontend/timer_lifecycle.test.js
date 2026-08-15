@@ -82,7 +82,7 @@ __exports.setExamContext = (opts = {}) => {
   examTimerMode = 'per_question';
   examFullPreview = false;
   examPaused = false;
-  examPauseRemaining = 0;
+  examPauseRemaining = null;
   examProgress = { total_count: examTotalCount, answers: opts.answers ?? [] };
   state.questionStartTime = opts.questionStartTime ?? Date.now();
 };
@@ -155,6 +155,9 @@ test('入口二边界：仍在考试页时清理守卫不误清', () => {
   const cleanup = windowHandlers.hashchange.at(-1);
   cleanup();
   assert.deepEqual(timers.cleared, [], '仍在 /exam 时清理守卫不应清倒计时');
+  context.location.hash = '#/exam?tab=1'; // 守卫与 showNav 同口径：忽略 query 串
+  cleanup();
+  assert.deepEqual(timers.cleared, [], '带 query 的 /exam 也不应被误判为已离开');
 });
 
 test('入口二边界：切题请求在途时离开考试页，完成后不启动后台倒计时', async () => {
@@ -293,4 +296,14 @@ test('入口一收尾路径：提前交卷停表后暂停→继续不重启计�
   exports.pauseExam();
   exports.resumeExam();
   assert.equal(timers.started.length, 1, '交卷后暂停→继续不得重启计时器');
+});
+
+test('收尾路径回归：暂停中交卷不再为停表重启一次倒计时', async () => {
+  const { timers, exports } = loadTimerApp({ api: { finishExam: async () => {} } });
+  exports.setExamContext({ examId: 42, totalCount: 1 });
+  exports.startTimer(60);
+  exports.pauseExam(); // pauseExam 已停表；旧实现 finishExam 会先 resume 重启一条再立即停掉
+  await exports.finishExam();
+  assert.equal(timers.started.length, 1, '暂停中交卷不得额外启动第二条 interval');
+  assert.equal(exports.timerState().interval, null, '交卷后 interval 引用必须为 null');
 });

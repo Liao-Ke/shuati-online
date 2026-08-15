@@ -26,10 +26,10 @@
 
 | 清理点 | 说明 |
 | --- | --- |
-| hashchange 离开 `/exam` | 入口二：离开考试页即停倒计时 |
+| hashchange 离开 `/exam` | 入口二：离开考试页即停倒计时（路由判定忽略 query 串，与 `showNav` 同口径） |
 | `loadQuestionByIndex` | 切题先停旧倒计时，新题渲染后按需重启 |
 | `pauseExam` | 暂停前记录 `hadCountdown`，随后停表置空 |
-| `finishExam` | 交卷停表 |
+| `finishExam` | 非暂停时交卷停表；暂停中计时器已停，直接交卷避免先重启再停 |
 | `toggleExamMode` | 进入整卷模式停单题倒计时（#52） |
 | `startTimer` 重启前 / 归零回调 | 重启不叠加；归零自动提交前先置空 |
 | `submitCurrentAnswer` | 手动提交停表 |
@@ -41,28 +41,40 @@
   `examPauseRemaining = hadCountdown ? parseTime(...) : null`。
 - `resumeExam`：`examPauseRemaining !== null` 才 `startTimer`——null 表示暂停时
   本就没有进行中的倒计时，回看已作答题/整卷模式/交卷后均不会凭空重启。
+- `examPauseRemaining` 初值及 `/exam` 路由、`resetSessionState` 两个重置点统一为
+  `null`，与守卫语义自洽（此前是 `0`，虽然不可达但存在两套空值表示）。
 - 边界：暂停瞬间切题请求在途时，`loadQuestionByIndex` 完成后不再立即启动倒计时，
   而是置 `examPendingTimer = true` 挂起；恢复时按该题默认时长补启动全新倒计时，
   避免暂停状态下倒计时归零静默提交新题。
 
 ### 离开考试页清理
 
-- 模块级新增 hashchange 清理监听：hash 离开 `/exam` 即调用 `stopExamTimer()`。
+- 模块级新增 hashchange 清理监听：hash 离开 `/exam` 即调用 `stopExamTimer()`；
+  路由判定用 `split('?')[0]` 忽略 query 串，避免 `#/exam?x=y` 被误判为已离开。
 - 边界：切题请求在途时离开考试页或已开新考试，`loadQuestionByIndex` 收到响应后
   丢弃过期结果（比较请求时的 examId 与当前路由），不渲染、不启动倒计时。
   （elapsed 计时不在本 issue 范围：其归零不触发提交，且 /exam 路由重入时自清重启。）
 
+### 一致性收尾
+
+- 新增 `stopElapsedTimer()` 统一整卷计时的「清 interval 并置 null」，替换
+  result 路由、`pauseExam`、`finishExam`、`startElapsedTimer`、`resetSessionState`
+  等清理点，与单题倒计时保持同一不变式。
+- `stopExamTimer`/`stopElapsedTimer` 判空统一为 `!== null`，消除真值判断混用。
+- `finishExam` 暂停中直接交卷：`pauseExam` 已停掉全部计时器，先 `resumeExam`
+  再停表只会白启动一次又立即停掉；接口失败时仍保持暂停态供用户继续。
+
 ## 验证方式
 
 ```bash
-node --test tests/frontend/*.test.js   # 48 pass（timer_lifecycle 共 11 项）
+node --test tests/frontend/*.test.js   # 49 pass（timer_lifecycle 共 12 项）
 ```
 
 `tests/frontend/timer_lifecycle.test.js` 覆盖：
 
 - 无倒计时暂停→恢复不启动 interval（入口一守卫）；
 - 真有倒计时时暂停/恢复按剩余秒数重启（回归）；
-- 离开考试页清 interval、仍在 `/exam` 不误清（入口二及其边界）；
+- 离开考试页清 interval、仍在 `/exam` 不误清、带 query 的 `/exam` 不误清（入口二及其边界）；
 - 切题请求在途时离开考试页，完成后不渲染旧题、不启动后台倒计时（入口二异步边界）；
 - 旧考试切题请求在途时开启新考试，完成后按 examId 丢弃过期响应、
   不渲染旧题、不启动后台倒计时（examId 分支的交叉提交防线）；
@@ -71,14 +83,16 @@ node --test tests/frontend/*.test.js   # 48 pass（timer_lifecycle 共 11 项）
 - **提交路径**：手动 `submitCurrentAnswer` 停表后暂停→恢复不重启、不重复提交；
 - **归零路径**：手动触发归零回调自动提交后暂停→恢复不重启、不重复提交；
 - 暂停期间切题请求完成：暂停中不启动倒计时，恢复时补启动全新倒计时；
-- **收尾路径**：`finishExam` 停表后暂停→恢复不重启。
+- **收尾路径**：`finishExam` 停表后暂停→恢复不重启；暂停中交卷不额外重启倒计时。
 
-已红-绿验证（最终 11 项用例分别运行在仓库历史版本上）：
+已红-绿验证（最终 12 项用例分别运行在仓库历史版本上）：
 
-- PR 前 base `a15ceee`：9 项失败、2 项通过，两条入口及全部残留路径均红；
-- 第一 commit `56cdec7`（仅 pause 守卫 + hashchange 内联清理）：7 项失败，
-  主复现/提交/归零/收尾与两条异步边界仍红，证明第二 commit 的收敛与异步守卫必要；
-- 修复版：前端套件 48 项全部通过（timer_lifecycle 11/11）。
+- PR 前 base `a15ceee`：10 项失败、2 项通过，两条入口及全部残留路径均红；
+- 第一 commit `56cdec7`（仅 pause 守卫 + hashchange 内联清理）：9 项失败，
+  主复现/提交/归零/收尾与异步边界仍红；
+- 上一版 head `d737c55`：仅新增的「带 query 不误清」「暂停中交卷不重启」2 项红，
+  证明一致性收尾的测试不是假绿；
+- 修复版：前端套件 49 项全部通过（timer_lifecycle 12/12）。
 
 ## 已知限制
 
