@@ -44,7 +44,9 @@ function loadRenderers() {
   };
   const context = {
     console,
-    location: { hash: '' },
+    // loadQuestionByIndex 会丢弃“不在 /exam 路由”的过期响应（issue #151 入口二），
+    // 渲染类测试必须模拟真实考试页上下文
+    location: { hash: '#/exam' },
     window: { addEventListener() {}, removeEventListener() {}, scrollTo() {} },
     setTimeout() {},
     clearTimeout() {},
