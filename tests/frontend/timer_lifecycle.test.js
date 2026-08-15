@@ -155,7 +155,9 @@ test('入口二边界：仍在考试页时清理守卫不误清', () => {
   const cleanup = windowHandlers.hashchange.at(-1);
   cleanup();
   assert.deepEqual(timers.cleared, [], '仍在 /exam 时清理守卫不应清倒计时');
-  context.location.hash = '#/exam?tab=1'; // 守卫与 showNav 同口径：忽略 query 串
+  // 与 showNav/stale-guard 同口径：忽略 query 串。当前 Router 正则不匹配带 query
+  // 的 /exam（会落 404），该状态仅手工改地址栏可达，此处只校验守卫口径一致性。
+  context.location.hash = '#/exam?tab=1';
   cleanup();
   assert.deepEqual(timers.cleared, [], '带 query 的 /exam 也不应被误判为已离开');
 });
@@ -178,6 +180,27 @@ test('入口二边界：切题请求在途时离开考试页，完成后不启�
   assert.deepEqual(timers.started, [], '离开考试页后切题完成不得启动倒计时');
   assert.equal(elements.get('exam-content'), undefined, '过期响应不得渲染旧题');
   assert.equal(exports.timerState().interval, null);
+});
+
+test('入口二边界：带 query 的 /exam 不算离开，切题响应照常渲染', async () => {
+  let resolveQuestion;
+  const api = {
+    getCurrentQuestion: () => new Promise((resolve) => { resolveQuestion = resolve; }),
+  };
+  const { context, timers, elements, exports } = loadTimerApp({ api });
+  exports.setExamContext({ examId: 42, totalCount: 1 });
+  const loading = exports.loadQuestionByIndex(0);
+  // stale-guard 与 hashchange 清理监听同口径：忽略 query 串。
+  // Router 正则不匹配带 query 的 /exam，该状态仅手工改地址栏可达，此处只校验口径一致。
+  context.location.hash = '#/exam?tab=1';
+  resolveQuestion({
+    question: { id: 1, type: 'fill', content: '1+1=?', options: null, chapter: null, analysis: null, blank_count: 1 },
+    is_answered: false,
+    total_count: 1,
+  });
+  await loading;
+  assert.notEqual(elements.get('exam-content'), undefined, '仍在考试页（忽略 query）应照常渲染新题');
+  assert.equal(timers.started.length, 1, '应启动该题倒计时');
 });
 
 test('入口二异步边界：旧考试切题请求在途时开启新考试，完成后丢弃过期响应', async () => {

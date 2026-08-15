@@ -52,7 +52,8 @@
 - 模块级新增 hashchange 清理监听：hash 离开 `/exam` 即调用 `stopExamTimer()`；
   路由判定用 `split('?')[0]` 忽略 query 串，避免 `#/exam?x=y` 被误判为已离开。
 - 边界：切题请求在途时离开考试页或已开新考试，`loadQuestionByIndex` 收到响应后
-  丢弃过期结果（比较请求时的 examId 与当前路由），不渲染、不启动倒计时。
+  丢弃过期结果（比较请求时的 examId 与当前路由），不渲染、不启动倒计时；
+  stale-guard 与清理监听同口径忽略 query 串，避免两处守卫对同一 hash 结论相反。
   （elapsed 计时不在本 issue 范围：其归零不触发提交，且 /exam 路由重入时自清重启。）
 
 ### 一致性收尾
@@ -67,7 +68,7 @@
 ## 验证方式
 
 ```bash
-node --test tests/frontend/*.test.js   # 49 pass（timer_lifecycle 共 12 项）
+node --test tests/frontend/*.test.js   # 50 pass（timer_lifecycle 共 13 项）
 ```
 
 `tests/frontend/timer_lifecycle.test.js` 覆盖：
@@ -76,6 +77,7 @@ node --test tests/frontend/*.test.js   # 49 pass（timer_lifecycle 共 12 项）
 - 真有倒计时时暂停/恢复按剩余秒数重启（回归）；
 - 离开考试页清 interval、仍在 `/exam` 不误清、带 query 的 `/exam` 不误清（入口二及其边界）；
 - 切题请求在途时离开考试页，完成后不渲染旧题、不启动后台倒计时（入口二异步边界）；
+- 带 query 的 `/exam` 下 stale-guard 与清理监听同口径放行，切题响应照常渲染；
 - 旧考试切题请求在途时开启新考试，完成后按 examId 丢弃过期响应、
   不渲染旧题、不启动后台倒计时（examId 分支的交叉提交防线）；
 - **主复现路径**：`startTimer(60)` → `loadQuestionByIndex` 渲染已作答题 →
@@ -85,14 +87,14 @@ node --test tests/frontend/*.test.js   # 49 pass（timer_lifecycle 共 12 项）
 - 暂停期间切题请求完成：暂停中不启动倒计时，恢复时补启动全新倒计时；
 - **收尾路径**：`finishExam` 停表后暂停→恢复不重启；暂停中交卷不额外重启倒计时。
 
-已红-绿验证（最终 12 项用例分别运行在仓库历史版本上）：
+已红-绿验证（最终 13 项用例分别运行在仓库历史版本上）：
 
-- PR 前 base `a15ceee`：10 项失败、2 项通过，两条入口及全部残留路径均红；
-- 第一 commit `56cdec7`（仅 pause 守卫 + hashchange 内联清理）：9 项失败，
-  主复现/提交/归零/收尾与异步边界仍红；
-- 上一版 head `d737c55`：仅新增的「带 query 不误清」「暂停中交卷不重启」2 项红，
+- PR 前 base `a15ceee`：两条入口及全部残留路径均红；
+- 第一 commit `56cdec7`（仅 pause 守卫 + hashchange 内联清理）：主复现/提交/归零/收尾与异步边界仍红；
+- 上一版 head `d737c55`：仅「带 query 不误清」「暂停中交卷不重启」2 项红；
+- 上一版 head `e140829`：仅新增的「带 query stale-guard 同口径放行」1 项红，
   证明一致性收尾的测试不是假绿；
-- 修复版：前端套件 49 项全部通过（timer_lifecycle 12/12）。
+- 修复版：前端套件 50 项全部通过（timer_lifecycle 13/13）。
 
 ## 已知限制
 

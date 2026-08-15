@@ -1486,8 +1486,10 @@ async function loadQuestionByIndex(index) {
   try {
     const data = await api.getCurrentQuestion(requestedExamId, index);
     // 请求在途时考试上下文已变化（离开考试页或已开新考试）：丢弃过期响应，
-    // 防止旧题渲染进新页面/新考试，或离开后在后台启动倒计时归零提交（issue #151 入口二）
-    if (examId !== requestedExamId || location.hash.replace(/^#/, '') !== '/exam') return;
+    // 防止旧题渲染进新页面/新考试，或离开后在后台启动倒计时归零提交（issue #151 入口二）。
+    // 路由判定与 hashchange 清理监听同口径：忽略 query 串（当前 Router 不匹配带 query
+    // 的 /exam，仅手工改地址栏可达，统一口径避免两处守卫对同一 hash 结论相反）。
+    if (examId !== requestedExamId || location.hash.replace(/^#/, '').split('?')[0] !== '/exam') return;
     if (!data.question) {
       router.navigate(`/result/${examId}`);
       return;
