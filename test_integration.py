@@ -1,4 +1,5 @@
 import json
+import threading
 import time
 import uuid
 from datetime import UTC, datetime, timedelta
@@ -2817,3 +2818,295 @@ def test_144_question_sampling_varies_across_exams(client, auth_headers):
 
     assert len(subsets) > 1, "8 次开考抽到的题目子集完全相同，抽样仍是确定性的"
     client.delete(f"/api/question-banks/{new_bank}", headers=auth_headers)
+
+
+def test_172_corrupt_snapshot_does_not_break_question_management(client):
+    """损坏的 question_ids/bank_ids 快照不再阻断题目/题库管理（issue #172）：
+    此前 #90/#19 的进行中考试检查对 parse_json_field 返回的原始字符串做
+    `int in str` 抛 TypeError → 500，用户名下只要有一条损坏快照的进行中考试，
+    就无法编辑/删除任何题目、无法删除任何题库；提交答案则被字符集合误判 400。
+    修复后损坏快照按空列表降级（与 #43 读路径口径一致）。"""
+    from database import SessionLocal
+    from models import ExamRecord
+
+    headers = _register_isolated_user(client, "u172")
+    bank = _import_bank(client, headers, title=f"快照损坏宿主-{uuid.uuid4().hex[:8]}")
+    r = client.post("/api/exam/start", json={
+        "bank_ids": [bank], "mode": "sequential",
+    }, headers=headers)
+    assert r.status_code == 200, r.text
+    exam_id = r.json()["exam_id"]
+
+    db = SessionLocal()
+    try:
+        # 模拟截断的 JSON：parse_json_field 解析失败会原样返回字符串
+        db.query(ExamRecord).filter(ExamRecord.id == exam_id).update(
+            {"question_ids": "[1, 2", "bank_ids": "[3, 4"})
+        db.commit()
+    finally:
+        db.close()
+
+    # 编辑/删除题目：#90 检查遍历该用户全部进行中考试，损坏快照此前必 500
+    r = client.post(f"/api/question-banks/{bank}/questions", json={
+        "type": "judge", "content": "受害题", "answer": "对",
+    }, headers=headers)
+    assert r.status_code == 201
+    qid = r.json()["id"]
+    r = client.put(f"/api/questions/{qid}", json={"content": "改后的题干"}, headers=headers)
+    assert r.status_code == 200, f"损坏快照不应阻断编辑题目: {r.text}"
+    assert client.delete(f"/api/questions/{qid}", headers=headers).status_code == 204
+
+    # 对损坏考试提交答案：明确 400 而非 TypeError
+    qid2 = client.get(f"/api/question-banks/{bank}", headers=headers).json()["questions"][0]["id"]
+    r = client.post(f"/api/exam/{exam_id}/answer", json={
+        "exam_id": exam_id, "question_id": qid2, "user_answer": "对", "time_spent_seconds": 1,
+    }, headers=headers)
+    assert r.status_code == 400
+    assert "不属于本次考试" in r.text
+
+    # 删除题库：#19 检查对损坏 bank_ids 此前必 500；降级后按无引用放行
+    assert client.delete(f"/api/question-banks/{bank}", headers=headers).status_code == 204
+def test_146_fill_answer_rejects_empty_array(client):
+    """填空题答案为空数组时，导入/新建/编辑三条路径均应 400 拒绝（issue #146）。
+    空数组入库会生成 blank_count=0 的畸形题：前端渲染 0 个输入框无法作答，
+    判分时空提交与 [] 逐位比对全部通过直接判对。
+    用隔离用户：编辑路径的进行中考试检查（#90）对共享用户被 test_43d 留下的
+    损坏 question_ids 快照会 500（parse_json_field 未防护，属独立 bug）。"""
+    headers = _register_isolated_user(client, "u146")
+    bank = _import_bank(client, headers, title=f"空数组填空宿主-{uuid.uuid4().hex[:8]}")
+
+    # 导入路径（routers/banks.py）
+    r = client.post("/api/question-banks/import", json={
+        "title": "空数组填空", "questions": [{"type": "fill", "content": "x", "answer": []}],
+    }, headers=headers)
+    assert r.status_code == 400
+    assert "不能为空" in r.text
+
+    # 新建路径（routers/questions.py）
+    r = client.post(f"/api/question-banks/{bank}/questions", json={
+        "type": "fill", "content": "x", "answer": [],
+    }, headers=headers)
+    assert r.status_code == 400
+    assert "不能为空" in r.text
+
+    # 编辑路径：合法多空题改成空数组同样拒绝
+    r = client.post(f"/api/question-banks/{bank}/questions", json={
+        "type": "fill", "content": "a____b____c", "answer": ["1", "2"],
+    }, headers=headers)
+    assert r.status_code == 201
+    qid = r.json()["id"]
+    r = client.put(f"/api/questions/{qid}", json={"answer": []}, headers=headers)
+    assert r.status_code == 400
+    assert "不能为空" in r.text
+    # 原答案未被破坏（题库详情当前以原始 JSON 字符串返回 answer，见 issue #139）
+    r = client.get(f"/api/question-banks/{bank}", headers=headers)
+    q = next(q for q in r.json()["questions"] if q["id"] == qid)
+    assert q["answer"] in (["1", "2"], '["1", "2"]')
+def test_149_list_banks_question_count_aggregate(client):
+    """题库列表 question_count 改聚合计数后返回值不变：多题库各自计数准确，
+    0 题库（outerjoin 边界）计数为 0 且不丢行（issue #149）"""
+    headers = _register_isolated_user(client, "u149")
+    full_bank = _import_bank(client, headers, title="计数-5题")
+    r = client.post("/api/question-banks/import", json={
+        "title": "计数-0题", "questions": [{"type": "judge", "content": "临时题", "answer": "对"}],
+    }, headers=headers)
+    assert r.status_code == 201
+    empty_bank = r.json()["id"]
+    qid = client.get(f"/api/question-banks/{empty_bank}", headers=headers).json()["questions"][0]["id"]
+    assert client.delete(f"/api/questions/{qid}", headers=headers).status_code == 204
+
+    r = client.get("/api/question-banks", headers=headers)
+    assert r.status_code == 200
+    banks = r.json()
+    assert len(banks) == 2, "0 题库不应因聚合查询从列表中消失"
+    counts = {b["id"]: b["question_count"] for b in banks}
+    assert counts[full_bank] == 5
+    assert counts[empty_bank] == 0
+# ── issue #132：删除守卫 check-then-act 跨事务竞态 ──
+
+
+def _race_concurrent(fn_a, fn_b):
+    """Barrier 同步并发执行两个请求函数，返回 {"a": ..., "b": ...}。"""
+    barrier = threading.Barrier(2)
+    results = {}
+
+    def _run(key, fn):
+        barrier.wait()
+        try:
+            results[key] = fn()
+        except Exception as exc:  # 保存异常，join 后统一抛出，避免 KeyError 掩盖真实失败
+            results[key] = exc
+
+    threads = [
+        threading.Thread(target=_run, args=("a", fn_a)),
+        threading.Thread(target=_run, args=("b", fn_b)),
+    ]
+    for t in threads:
+        t.start()
+    for t in threads:
+        t.join()
+    errors = [v for v in results.values() if isinstance(v, Exception)]
+    if errors:
+        raise errors[0]
+    return results
+
+
+def _import_single_judge_bank(client, headers, tag):
+    """导入单题（judge）题库，返回 (bank_id, question_id)。"""
+    r = client.post("/api/question-banks/import", json={
+        "title": f"{tag}_{uuid.uuid4().hex[:8]}", "description": "",
+        "questions": [{"type": "judge", "content": f"{tag}题目", "answer": "对"}],
+    }, headers=headers)
+    assert r.status_code == 201, r.text
+    bid = r.json()["id"]
+    qid = client.get(f"/api/question-banks/{bid}", headers=headers).json()["questions"][0]["id"]
+    return bid, qid
+
+
+def test_132_write_routes_begin_immediate(client):
+    """四个写事务路由（开考/错题开考/删题/删库）均以 BEGIN IMMEDIATE 起步（issue #132）"""
+    from sqlalchemy import event
+
+    from database import engine
+
+    headers = _register_isolated_user(client, "race132begin")
+    bid, qid = _import_single_judge_bank(client, headers, "写事务验证")
+    # 先答错一题并完成考试，为 wrong-answers/start 准备错题
+    r = client.post("/api/exam/start", json={"bank_ids": [bid], "mode": "sequential"}, headers=headers)
+    exam_id = r.json()["exam_id"]
+    r = client.post(f"/api/exam/{exam_id}/answer", json={
+        "exam_id": exam_id, "question_id": qid, "user_answer": "错", "time_spent_seconds": 1,
+    }, headers=headers)
+    assert r.status_code == 200, r.text
+    client.post(f"/api/exam/{exam_id}/finish", headers=headers)
+
+    captured = []
+
+    @event.listens_for(engine, "before_cursor_execute")
+    def _cap(conn, cursor, statement, parameters, context, executemany):
+        captured.append(statement)
+
+    try:
+        r = client.post("/api/exam/start", json={"bank_ids": [bid], "mode": "sequential"}, headers=headers)
+        assert r.status_code == 200, r.text
+        r = client.post("/api/wrong-answers/start", json={}, headers=headers)
+        assert r.status_code == 200, r.text
+        # 上述开考已创建引用 qid/bid 的进行中考试：删除请求必然 409，但写事务
+        # 在守卫之前就已 BEGIN IMMEDIATE，409 本身也证明守卫在写事务内工作
+        r = client.delete(f"/api/questions/{qid}", headers=headers)
+        assert r.status_code == 409, r.text
+        r = client.delete(f"/api/question-banks/{bid}", headers=headers)
+        assert r.status_code == 409, r.text
+    finally:
+        event.remove(engine, "before_cursor_execute", _cap)
+
+    begin_immediate = [s for s in captured if "BEGIN IMMEDIATE" in s.upper()]
+    assert len(begin_immediate) >= 4, \
+        f"四个写事务路由都应发出 BEGIN IMMEDIATE，捕获语句: {captured}"
+
+
+def test_132_concurrent_delete_question_vs_start(client):
+    """并发「删题」与「开考」不再产生引用已删题目的 in_progress 考试（issue #132）"""
+    from database import SessionLocal
+    from models import ExamRecord
+    from utils import parse_json_field
+
+    headers = _register_isolated_user(client, "race132q")
+    deleted_ids = []
+    for i in range(10):
+        bid, qid = _import_single_judge_bank(client, headers, f"竞态删题{i}")
+        c_a, c_b = TestClient(app), TestClient(app)
+        results = _race_concurrent(
+            lambda c_a=c_a, qid=qid, headers=headers: c_a.delete(f"/api/questions/{qid}", headers=headers).status_code,
+            lambda c_b=c_b, bid=bid, headers=headers: c_b.post("/api/exam/start", json={
+                "bank_ids": [bid], "mode": "sequential",
+            }, headers=headers).status_code,
+        )
+        assert results["a"] in (204, 409), f"删题返回异常状态码: {results['a']}"
+        assert results["b"] in (200, 400), f"开考返回异常状态码: {results['b']}"
+        if results["a"] == 204:
+            deleted_ids.append(qid)
+
+    db = SessionLocal()
+    try:
+        in_progress = db.query(ExamRecord).filter(ExamRecord.status == "in_progress").all()
+        for exam in in_progress:
+            refs = parse_json_field(exam.question_ids) or []
+            assert not (set(refs) & set(deleted_ids)), \
+                f"考试 {exam.id} 引用了已删除题目: {refs} ∩ {deleted_ids}"
+    finally:
+        db.close()
+
+
+def test_132_concurrent_delete_bank_vs_start(client):
+    """并发「删题库」与「开考」不再产生引用已删题库的 in_progress 考试（issue #132）"""
+    from database import SessionLocal
+    from models import ExamRecord
+    from utils import parse_json_field
+
+    headers = _register_isolated_user(client, "race132b")
+    deleted_bank_ids = []
+    for i in range(10):
+        bid, _qid = _import_single_judge_bank(client, headers, f"竞态删库{i}")
+        c_a, c_b = TestClient(app), TestClient(app)
+        results = _race_concurrent(
+            lambda c_a=c_a, bid=bid, headers=headers: c_a.delete(f"/api/question-banks/{bid}", headers=headers).status_code,
+            lambda c_b=c_b, bid=bid, headers=headers: c_b.post("/api/exam/start", json={
+                "bank_ids": [bid], "mode": "sequential",
+            }, headers=headers).status_code,
+        )
+        assert results["a"] in (204, 409), f"删题库返回异常状态码: {results['a']}"
+        assert results["b"] in (200, 400), f"开考返回异常状态码: {results['b']}"
+        if results["a"] == 204:
+            deleted_bank_ids.append(bid)
+
+    db = SessionLocal()
+    try:
+        in_progress = db.query(ExamRecord).filter(ExamRecord.status == "in_progress").all()
+        for exam in in_progress:
+            refs = parse_json_field(exam.bank_ids) or []
+            assert not (set(refs) & set(deleted_bank_ids)), \
+                f"考试 {exam.id} 引用了已删除题库: {refs} ∩ {deleted_bank_ids}"
+    finally:
+        db.close()
+
+
+def test_132_concurrent_delete_question_vs_wrong_start(client):
+    """并发「删题」与「错题练习开考」不再产生引用已删题目的 in_progress 考试（issue #132）"""
+    from database import SessionLocal
+    from models import ExamRecord
+    from utils import parse_json_field
+
+    headers = _register_isolated_user(client, "race132w")
+    deleted_ids = []
+    for i in range(5):
+        bid, qid = _import_single_judge_bank(client, headers, f"竞态错题{i}")
+        # 答错该题生成错题，再完成考试（否则删题会被这场进行中的考试 409 拦截）
+        r = client.post("/api/exam/start", json={"bank_ids": [bid], "mode": "sequential"}, headers=headers)
+        exam_id = r.json()["exam_id"]
+        r = client.post(f"/api/exam/{exam_id}/answer", json={
+            "exam_id": exam_id, "question_id": qid, "user_answer": "错", "time_spent_seconds": 1,
+        }, headers=headers)
+        assert r.status_code == 200, r.text
+        r = client.post(f"/api/exam/{exam_id}/finish", headers=headers)
+        assert r.status_code == 200, r.text
+
+        c_a, c_b = TestClient(app), TestClient(app)
+        results = _race_concurrent(
+            lambda c_a=c_a, qid=qid, headers=headers: c_a.delete(f"/api/questions/{qid}", headers=headers).status_code,
+            lambda c_b=c_b, headers=headers: c_b.post("/api/wrong-answers/start", json={}, headers=headers).status_code,
+        )
+        assert results["a"] in (204, 409), f"删题返回异常状态码: {results['a']}"
+        assert results["b"] in (200, 400), f"错题练习开考返回异常状态码: {results['b']}"
+        if results["a"] == 204:
+            deleted_ids.append(qid)
+
+    db = SessionLocal()
+    try:
+        in_progress = db.query(ExamRecord).filter(ExamRecord.status == "in_progress").all()
+        for exam in in_progress:
+            refs = parse_json_field(exam.question_ids) or []
+            assert not (set(refs) & set(deleted_ids)), \
+                f"考试 {exam.id} 引用了已删除题目: {refs} ∩ {deleted_ids}"
+    finally:
+        db.close()

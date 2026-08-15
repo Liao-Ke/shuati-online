@@ -31,3 +31,17 @@ def get_db():
         yield db
     finally:
         db.close()
+
+
+def get_write_db():
+    db = SessionLocal()
+    try:
+        # SQLite 写事务（issue #132）：pysqlite 方言 do_begin 不发语句，事务靠驱动
+        # 隐式 BEGIN，SELECT 实际在事务外执行（读快照与写入分离）——这是删除守卫
+        # check-then-act 竞态的根源。此处显式 BEGIN IMMEDIATE：事务从第一条语句起
+        # 持有写锁，串行化所有写者；sqlite3 检测 in_transaction 后不会重复隐式 BEGIN，
+        # 提交/回滚仍由 Session 照常发出。
+        db.connection().exec_driver_sql("BEGIN IMMEDIATE")
+        yield db
+    finally:
+        db.close()

@@ -66,9 +66,11 @@ def test_upgrade_adds_autoincrement_and_preserves_data(db_path):
     assert "AUTOINCREMENT" in _ddl(db, "questions")
     assert "AUTOINCREMENT" in _ddl(db, "question_banks")
     assert db.execute("SELECT id, bank_id, content FROM questions").fetchall() == before
+    # a1f7c2d3e4b5（issue #137）后主键 id 冗余索引已删、外键索引落地：
+    # 「重建不丢索引」的语义改由 head 状态的外键索引存在性验证
     assert db.execute(
         "SELECT count(*) FROM sqlite_master WHERE type='index' AND name IN"
-        " ('ix_questions_id', 'ix_question_banks_id')"
+        " ('ix_questions_bank_id', 'ix_question_banks_user_id')"
     ).fetchone()[0] == 2
     assert db.execute("PRAGMA foreign_key_check").fetchall() == []
     assert db.execute("PRAGMA integrity_check").fetchone()[0] == "ok"
@@ -185,7 +187,8 @@ def test_downgrade_restores_schema_and_data(db_path):
     db.close()
 
     _alembic(db_path, "upgrade", "head")
-    _alembic(db_path, "downgrade", "-1")
+    # 显式回滚到 3159 的父版本：head 之后还有别的迁移（a1f7c2d3e4b5），"-1" 不再指向本迁移
+    _alembic(db_path, "downgrade", PREV_REVISION)
 
     db = sqlite3.connect(db_path)
     assert "AUTOINCREMENT" not in _ddl(db, "questions")
@@ -211,3 +214,72 @@ def test_upgrade_on_empty_database(tmp_path):
     assert "AUTOINCREMENT" in _ddl(db, "question_banks")
     assert db.execute("INSERT INTO users (username, password_hash) VALUES ('u', 'x')").lastrowid == 1
     db.close()
+
+
+FK_INDEXES_137 = {
+    "ix_question_banks_user_id", "ix_questions_bank_id", "ix_exam_records_user_id",
+    "ix_answer_records_exam_id", "ix_answer_records_question_id", "ix_review_records_question_id",
+}
+REDUNDANT_PK_INDEXES_137 = {
+    "ix_users_id", "ix_question_banks_id", "ix_questions_id",
+    "ix_exam_records_id", "ix_answer_records_id", "ix_review_records_id",
+}
+
+
+def _index_names(db: sqlite3.Connection) -> set[str]:
+    return {r[0] for r in db.execute(
+        "SELECT name FROM sqlite_master WHERE type='index' AND name NOT LIKE 'sqlite_%'"
+    )}
+
+
+def test_137_fk_indexes_added_redundant_pk_indexes_dropped(tmp_path):
+    """迁移 a1f7c2d3e4b5（issue #137）：6 个外键索引落地、6 个主键 id 冗余索引
+    删除、username 唯一索引保留；downgrade 完整回滚"""
+    path = str(tmp_path / "idx.db")
+    _alembic(path, "upgrade", "head")
+
+    db = sqlite3.connect(path)
+    names = _index_names(db)
+    assert names >= FK_INDEXES_137, f"外键索引缺失: {FK_INDEXES_137 - names}"
+    assert not (REDUNDANT_PK_INDEXES_137 & names), f"冗余主键索引残留: {REDUNDANT_PK_INDEXES_137 & names}"
+    assert "ix_users_username" in names
+    # 外键索引真实生效：按外键过滤走索引而非全表扫
+    plan = db.execute("EXPLAIN QUERY PLAN SELECT * FROM questions WHERE bank_id=1").fetchall()
+    assert any("ix_questions_bank_id" in str(row) for row in plan), f"查询计划未走索引: {plan}"
+    db.close()
+
+    _alembic(path, "downgrade", "-1")
+    db = sqlite3.connect(path)
+    names = _index_names(db)
+    assert not (FK_INDEXES_137 & names)
+    assert names >= REDUNDANT_PK_INDEXES_137
+    db.close()
+def test_136_create_all_fresh_db_stamped_and_upgradable(tmp_path):
+    """create_all 建出的全新库自动 stamp 到 head：之后 alembic upgrade head
+    不再撞已存在的表（issue #136 坑 a 的根除验证）"""
+    path = str(tmp_path / "create_all.db")
+    subprocess.run(
+        [sys.executable, "-c", "import main"],
+        cwd=PROJECT_ROOT,
+        env={**os.environ, "DATABASE_URL": f"sqlite:///{path}"},
+        capture_output=True, text=True, check=True,
+    )
+    db = sqlite3.connect(path)
+    version = db.execute("SELECT version_num FROM alembic_version").fetchone()[0]
+    assert version, "create_all 建的新库应带 alembic 版本号"
+    db.close()
+    # 坑 a 的原始症状是 upgrade 撞表崩溃；stamp 后应干净通过（no-op 或后续增量）
+    _alembic(path, "upgrade", "head")
+
+
+def test_136_outdated_db_logs_explicit_error(db_path):
+    """存量库版本落后时启动日志必须显式告警，不允许静默沿用旧 schema（issue #136 坑 b）"""
+    r = subprocess.run(
+        [sys.executable, "-c", "import main"],
+        cwd=PROJECT_ROOT,
+        env={**os.environ, "DATABASE_URL": f"sqlite:///{db_path}"},
+        capture_output=True, text=True, check=True,
+    )
+    out = r.stdout + r.stderr
+    assert "schema 版本落后" in out, f"未见告警，输出：{out[-500:]}"
+    assert "alembic upgrade head" in out
