@@ -162,7 +162,7 @@ test('入口二边界：切题请求在途时离开考试页，完成后不启�
   const api = {
     getCurrentQuestion: () => new Promise((resolve) => { resolveQuestion = resolve; }),
   };
-  const { context, timers, exports } = loadTimerApp({ api });
+  const { context, timers, elements, exports } = loadTimerApp({ api });
   exports.setExamContext({ examId: 42, totalCount: 1 });
   const loading = exports.loadQuestionByIndex(0);
   context.location.hash = '#/banks'; // 请求在途时离开考试页
@@ -173,7 +173,30 @@ test('入口二边界：切题请求在途时离开考试页，完成后不启�
   });
   await loading;
   assert.deepEqual(timers.started, [], '离开考试页后切题完成不得启动倒计时');
+  assert.equal(elements.get('exam-content'), undefined, '过期响应不得渲染旧题');
   assert.equal(exports.timerState().interval, null);
+});
+
+test('入口二异步边界：旧考试切题请求在途时开启新考试，完成后丢弃过期响应', async () => {
+  let resolveQuestion;
+  const api = {
+    getCurrentQuestion: () => new Promise((resolve) => { resolveQuestion = resolve; }),
+  };
+  const { context, timers, elements, exports } = loadTimerApp({ api });
+  exports.setExamContext({ examId: 42, totalCount: 1 });
+  const loading = exports.loadQuestionByIndex(0);
+  // 请求在途期间开启新考试：仍在 /exam 路由，但 examId 已切换，
+  // 旧响应只能靠 examId 分支丢弃，否则会用新 examId 渲染旧题并启动倒计时
+  exports.setExamContext({ examId: 99, totalCount: 1 });
+  resolveQuestion({
+    question: { id: 1, type: 'fill', content: '1+1=?', options: null, chapter: null, analysis: null, blank_count: 1 },
+    is_answered: false,
+    total_count: 1,
+  });
+  await loading;
+  assert.equal(elements.get('exam-content'), undefined, '过期响应不得渲染旧题');
+  assert.deepEqual(timers.started, [], '过期响应不得启动后台倒计时');
+  assert.equal(exports.timerState().interval, null, '不得残留倒计时引用');
 });
 
 test('入口一主复现：回看已作答题（切题停表）后暂停→继续不重启计时器', async () => {
